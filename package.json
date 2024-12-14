@@ -4,7 +4,7 @@
   "main": "src/index.ts",
   "type": "module",
   "scripts": {
-    "build": "tsup --format esm --dts",
+    "build": "tsup src/index.ts --format esm --dts",
     "start": "tsc && node --loader ts-node/esm src/index.ts",
     "start:service:all": "pm2 start pnpm --name=\"all\" --restart-delay=3000 --max-restarts=10 -- run start:all",
     "stop:service:all": "pm2 stop all"
