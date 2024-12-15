@@ -1,7 +1,7 @@
 {
   "name": "Antichrist",
   "plugins": [],
-  "clients": [],
+  "clients": ["twitter"],
   "modelProvider": "openrouter",
   "settings": {
     "secrets": {},
