@@ -278,6 +278,9 @@ async function startAgent(character: Character, directClient: DirectClient) {
   }
 }
 
+let rl: readline.Interface;
+let isRlActive = true; 
+
 const startAgents = async () => {
   const directClient = await DirectClientInterface.start();
   const args = parseArguments();
@@ -298,12 +301,40 @@ const startAgents = async () => {
     elizaLogger.error("Error starting agents:", error);
   }
 
+  rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  const cleanup = () => {
+    if (isRlActive) {
+      isRlActive = false;
+      rl.close();
+    }
+    process.exit(0);
+  };
+
+  // Handle various termination signals
+  process.on('SIGINT', cleanup);
+  process.on('SIGTERM', cleanup);
+  process.on('SIGQUIT', cleanup);
+
   function chat() {
     const agentId = characters[0].name ?? "Agent";
+    if (!isRlActive) {
+      elizaLogger.error("Readline interface is closed");
+      process.exit(1);
+      return;
+    }
     rl.question("You: ", async (input) => {
-      await handleUserInput(input, agentId);
-      if (input.toLowerCase() !== "exit") {
-        chat(); // Loop back to ask another question
+      try {
+        await handleUserInput(input, agentId);
+        if (input.toLowerCase() !== "exit" && isRlActive) {
+          chat(); // Continue chat only if readline is still open
+        }
+      } catch (error) {
+        elizaLogger.error("Error in chat:", error);
+        cleanup();
       }
     });
   }
@@ -312,24 +343,12 @@ const startAgents = async () => {
   chat();
 };
 
-startAgents().catch((error) => {
-  elizaLogger.error("Unhandled error in startAgents:", error);
-  process.exit(1); // Exit the process after logging
-});
-
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout,
-});
-
-rl.on("SIGINT", () => {
-  rl.close();
-  process.exit(0);
-});
-
 async function handleUserInput(input, agentId) {
   if (input.toLowerCase() === "exit") {
-    rl.close();
+    if (isRlActive) {
+      isRlActive = false;
+      rl.close();
+    }
     process.exit(0);
     return;
   }
@@ -356,3 +375,8 @@ async function handleUserInput(input, agentId) {
     console.error("Error fetching response:", error);
   }
 }
+
+startAgents().catch((error) => {
+  elizaLogger.error("Unhandled error in startAgents:", error);
+  process.exit(1); // Exit the process after logging
+});
