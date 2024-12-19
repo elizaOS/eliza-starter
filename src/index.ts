@@ -24,7 +24,7 @@ import {
 } from "@ai16z/eliza";
 import { bootstrapPlugin } from "@ai16z/plugin-bootstrap";
 import { solanaPlugin } from "@ai16z/plugin-solana";
-import { nodePlugin } from "@ai16z/plugin-node";
+import { createNodePlugin } from "@ai16z/plugin-node";
 import Database from "better-sqlite3";
 import fs from "fs";
 import readline from "readline";
@@ -32,7 +32,7 @@ import yargs from "yargs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { character } from "./character.ts";
-import type { DirectClient } from "@ai16z/client-direct";
+import { DirectClient } from "@ai16z/client-direct";
 
 const __filename = fileURLToPath(import.meta.url); // get the resolved path to the file
 const __dirname = path.dirname(__filename); // get the name of the directory
@@ -105,44 +105,99 @@ export function getTokenForProvider(
   character: Character
 ) {
   switch (provider) {
-    case ModelProviderName.OPENAI:
-      return (
-        character.settings?.secrets?.OPENAI_API_KEY || settings.OPENAI_API_KEY
-      );
-    case ModelProviderName.LLAMACLOUD:
-      return (
-        character.settings?.secrets?.LLAMACLOUD_API_KEY ||
-        settings.LLAMACLOUD_API_KEY ||
-        character.settings?.secrets?.TOGETHER_API_KEY ||
-        settings.TOGETHER_API_KEY ||
-        character.settings?.secrets?.XAI_API_KEY ||
-        settings.XAI_API_KEY ||
-        character.settings?.secrets?.OPENAI_API_KEY ||
-        settings.OPENAI_API_KEY
-      );
-    case ModelProviderName.ANTHROPIC:
-      return (
-        character.settings?.secrets?.ANTHROPIC_API_KEY ||
-        character.settings?.secrets?.CLAUDE_API_KEY ||
-        settings.ANTHROPIC_API_KEY ||
-        settings.CLAUDE_API_KEY
-      );
-    case ModelProviderName.REDPILL:
-      return (
-        character.settings?.secrets?.REDPILL_API_KEY || settings.REDPILL_API_KEY
-      );
-    case ModelProviderName.OPENROUTER:
-      return (
-        character.settings?.secrets?.OPENROUTER || settings.OPENROUTER_API_KEY
-      );
-    case ModelProviderName.GROK:
-      return character.settings?.secrets?.GROK_API_KEY || settings.GROK_API_KEY;
-    case ModelProviderName.HEURIST:
-      return (
-        character.settings?.secrets?.HEURIST_API_KEY || settings.HEURIST_API_KEY
-      );
-    case ModelProviderName.GROQ:
-      return character.settings?.secrets?.GROQ_API_KEY || settings.GROQ_API_KEY;
+      case ModelProviderName.OPENAI:
+          return (
+              character.settings?.secrets?.OPENAI_API_KEY ||
+              settings.OPENAI_API_KEY
+          );
+      case ModelProviderName.ETERNALAI:
+          return (
+              character.settings?.secrets?.ETERNALAI_API_KEY ||
+              settings.ETERNALAI_API_KEY
+          );
+      case ModelProviderName.LLAMACLOUD:
+      case ModelProviderName.TOGETHER:
+          return (
+              character.settings?.secrets?.LLAMACLOUD_API_KEY ||
+              settings.LLAMACLOUD_API_KEY ||
+              character.settings?.secrets?.TOGETHER_API_KEY ||
+              settings.TOGETHER_API_KEY ||
+              character.settings?.secrets?.XAI_API_KEY ||
+              settings.XAI_API_KEY ||
+              character.settings?.secrets?.OPENAI_API_KEY ||
+              settings.OPENAI_API_KEY
+          );
+      case ModelProviderName.ANTHROPIC:
+          return (
+              character.settings?.secrets?.ANTHROPIC_API_KEY ||
+              character.settings?.secrets?.CLAUDE_API_KEY ||
+              settings.ANTHROPIC_API_KEY ||
+              settings.CLAUDE_API_KEY
+          );
+      case ModelProviderName.REDPILL:
+          return (
+              character.settings?.secrets?.REDPILL_API_KEY ||
+              settings.REDPILL_API_KEY
+          );
+      case ModelProviderName.OPENROUTER:
+          return (
+              character.settings?.secrets?.OPENROUTER ||
+              settings.OPENROUTER_API_KEY
+          );
+      case ModelProviderName.GROK:
+          return (
+              character.settings?.secrets?.GROK_API_KEY ||
+              settings.GROK_API_KEY
+          );
+      case ModelProviderName.HEURIST:
+          return (
+              character.settings?.secrets?.HEURIST_API_KEY ||
+              settings.HEURIST_API_KEY
+          );
+      case ModelProviderName.GROQ:
+          return (
+              character.settings?.secrets?.GROQ_API_KEY ||
+              settings.GROQ_API_KEY
+          );
+      case ModelProviderName.GALADRIEL:
+          return (
+              character.settings?.secrets?.GALADRIEL_API_KEY ||
+              settings.GALADRIEL_API_KEY
+          );
+      case ModelProviderName.FAL:
+          return (
+              character.settings?.secrets?.FAL_API_KEY || settings.FAL_API_KEY
+          );
+      case ModelProviderName.ALI_BAILIAN:
+          return (
+              character.settings?.secrets?.ALI_BAILIAN_API_KEY ||
+              settings.ALI_BAILIAN_API_KEY
+          );
+      case ModelProviderName.VOLENGINE:
+          return (
+              character.settings?.secrets?.VOLENGINE_API_KEY ||
+              settings.VOLENGINE_API_KEY
+          );
+      case ModelProviderName.NANOGPT:
+          return (
+              character.settings?.secrets?.NANOGPT_API_KEY ||
+              settings.NANOGPT_API_KEY
+          );
+      case ModelProviderName.HYPERBOLIC:
+          return (
+              character.settings?.secrets?.HYPERBOLIC_API_KEY ||
+              settings.HYPERBOLIC_API_KEY
+          );
+      case ModelProviderName.VENICE:
+          return (
+              character.settings?.secrets?.VENICE_API_KEY ||
+              settings.VENICE_API_KEY
+          );
+      case ModelProviderName.AKASH_CHAT_API:
+          return (
+              character.settings?.secrets?.AKASH_CHAT_API_KEY ||
+              settings.AKASH_CHAT_API_KEY
+          );
   }
 }
 
@@ -200,6 +255,8 @@ export async function initializeClients(
   return clients;
 }
 
+let nodePlugin: any | undefined;
+
 export function createAgent(
   character: Character,
   db: IDatabaseAdapter,
@@ -211,6 +268,9 @@ export function createAgent(
     "Creating runtime for character",
     character.name
   );
+
+  nodePlugin ??= createNodePlugin();
+
   return new AgentRuntime({
     databaseAdapter: db,
     token,
@@ -279,7 +339,7 @@ async function startAgent(character: Character, directClient: DirectClient) {
 }
 
 const startAgents = async () => {
-  const directClient = await DirectClientInterface.start();
+  const directClient = new DirectClient();
   const args = parseArguments();
 
   let charactersArg = args.characters || args.character;
@@ -292,7 +352,7 @@ const startAgents = async () => {
   console.log("characters", characters);
   try {
     for (const character of characters) {
-      await startAgent(character, directClient as DirectClient);
+      await startAgent(character, directClient);
     }
   } catch (error) {
     elizaLogger.error("Error starting agents:", error);
@@ -300,6 +360,7 @@ const startAgents = async () => {
 
   function chat() {
     const agentId = characters[0].name ?? "Agent";
+    console.log(agentId)
     rl.question("You: ", async (input) => {
       await handleUserInput(input, agentId);
       if (input.toLowerCase() !== "exit") {
@@ -308,6 +369,12 @@ const startAgents = async () => {
     });
   }
 
+  directClient.startAgent = async character => {
+    // wrap it so we don't have to inject directClient later
+    return startAgent(character, directClient)
+  };
+
+  directClient.start(parseInt(settings.SERVER_PORT) || 3000);
   elizaLogger.log("Chat started. Type 'exit' to quit.");
   chat();
 };
@@ -337,6 +404,7 @@ async function handleUserInput(input, agentId) {
   try {
     const serverPort = parseInt(settings.SERVER_PORT || "3000");
 
+    console.log(`http://localhost:${serverPort}/${agentId}/message`)
     const response = await fetch(
       `http://localhost:${serverPort}/${agentId}/message`,
       {
@@ -356,3 +424,4 @@ async function handleUserInput(input, agentId) {
     console.error("Error fetching response:", error);
   }
 }
+
