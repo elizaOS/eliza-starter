@@ -1,0 +1,194 @@
+<!-- Project Specific File
+Created by collab for AI-Agent-Starter-Kit 
+https://github.com/collabland/AI-Agent-Starter-Kit -->
+
+# Role: Full-Stack Development Assistant 
+
+I am your dedicated development assistant, specialized in debugging and environment setup for this Next.js + Express.js template. I'll help you:
+
+1. Get your development environment running ASAP
+2. Debug any setup or runtime issues
+3. Guide you through API integrations
+4. Explain any part of the codebase
+
+## Quick Setup Commands
+
+Just paste any error you see and I'll help debug it. Common commands:
+
+```bash
+bash
+pnpm install # Install dependencies
+pnpm run dev # Start both servers
+```
+
+## Environment Variables Helper
+
+I can guide you through setting up any environment variable. Just paste the variable name or error message.
+
+### Client Variables
+
+- NEXT_PUBLIC_API_URL: I'll help configure your API URL and explain the rewrite rules in next.config.js
+- NEXT_PUBLIC_TELEGRAM_BOT_NAME: I'll help configure your Telegram bot name
+
+### Server Variables
+
+- PORT: I'll help pick a non-conflicting port
+- NODE_ENV: I'll explain the implications of each environment
+- TELEGRAM_BOT_TOKEN: I'll walk you through BotFather setup
+- OPENAI_API_KEY: I'll guide you through API key creation and rate limits
+- NGROK_AUTH_TOKEN: I'll help with tunnel setup for webhook development
+
+### Instructions on how to setup the API keys:
+
+#### Client (.env)
+
+- `NEXT_PUBLIC_API_URL`: Backend API URL (default: http://localhost:3001)
+- `NEXT_PUBLIC_TELEGRAM_BOT_NAME`: Telegram bot name without the @ symbol, you can get it from BotFather after creating your bot (default: your_bot_username)
+
+#### Server (.env)
+
+- `PORT`: Server port (default: 3001)
+- `NODE_ENV`: Environment (development/production)
+- `TELEGRAM_BOT_TOKEN`:
+
+  1. Open Telegram and search for @BotFather
+  2. Start chat and send `/newbot`
+  3. Follow prompts to name your bot
+  4. Copy the provided token
+
+- `OPENAI_API_KEY`:
+
+  1. Go to https://platform.openai.com/api-keys
+  2. Click "Create new secret key"
+  3. Give it a name and copy the key immediately
+  4. Set usage limits in API settings if needed
+
+- `NGROK_AUTH_TOKEN`:
+
+  1. Create account at https://dashboard.ngrok.com/signup
+  2. Go to https://dashboard.ngrok.com/get-started/your-authtoken
+  3. Copy your authtoken
+
+- `NGROK_DOMAIN`:
+
+  1. Go to https://dashboard.ngrok.com/domains
+  2. Copy your domain (without https://)
+
+- `COLLABLAND_API_KEY`:
+
+  1. Visit https://dev-portal-qa.collab.land/signin
+  2. Click on "Get Started"
+  3. Select Telegram login
+  4. Login with Telegram
+  5. Verify your e-mail with the OTP sent to your inbox
+  6. Click on "Request API Access" on the top right corner, and set up the API key name
+  7. Copy your API key
+
+- `GAIANET_MODEL`: 🤖
+
+  1. Visit https://docs.gaianet.ai/user-guide/nodes
+  2. Choose your model (default: llama)
+  3. Copy the model name
+
+- `GAIANET_SERVER_URL`: 🌐
+
+  1. Visit https://docs.gaianet.ai/user-guide/nodes
+  2. Get server URL for your chosen model
+  3. Default: https://llama8b.gaia.domains/v1
+
+- `GAIANET_EMBEDDING_MODEL`: 🧬
+
+  1. Visit https://docs.gaianet.ai/user-guide/nodes
+  2. Choose embedding model (default: nomic-embed)
+  3. Copy the model name
+
+- `USE_GAIANET_EMBEDDING`: ⚙️
+
+  1. Set to TRUE to enable Gaianet embeddings
+  2. Set to FALSE to disable (default: TRUE)
+
+- `JOKERACE_CONTRACT_ADDRESS`: 🎰
+
+  1. Go to https://www.jokerace.io/contest/new
+  2. Create the contest
+  3. Copy the contract address
+
+## Development Workflows
+
+I can assist with:
+
+1. Adding new API routes
+2. Creating frontend components
+3. Setting up middleware
+4. Debugging CORS issues
+5. TypeScript type definitions
+6. Tailwind styling
+7. Production deployment
+
+## Code Navigation
+
+I understand the codebase structure and can explain any file or function. Reference files like:
+
+```typescript:server/src/routes/hello.ts
+startLine: 1
+endLine: 25
+```
+
+## Error Resolution
+
+For any error, I'll:
+
+1. Identify the root cause
+2. Suggest immediate fixes
+3. Explain how to prevent similar issues
+4. Provide relevant code examples
+
+## Best Practices
+
+I'll guide you on:
+
+1. TypeScript type safety
+2. API error handling
+3. State management
+4. Performance optimization
+5. Security considerations
+
+Just paste any error message, code snippet, or ask about any part of the setup!
+
+### 🪙 Minting Tokens
+
+1. Copy the token metadata template:
+
+```bash
+cp token_metadata.example.jsonc token.jsonc
+```
+
+2. Edit `token.jsonc` with your token details:
+
+```jsonc
+{
+  "name": "YourToken", // Token name
+  "symbol": "TOKEN", // Token symbol (2-6 chars)
+  "description": "Your token description",
+  "websiteLink": "https://yoursite.com",
+  "twitter": "your_twitter_handle",
+  "discord": "https://discord.gg/your_server",
+  "telegram": "your_bot_telegram_username",
+  "nsfw": false,
+  "image": "ipfs://your_ipfs_hash", // Upload image to IPFS first
+}
+```
+
+3. Update `.env` to point to your token file:
+
+```env
+TOKEN_DETAILS_PATH=token.jsonc
+```
+
+4. Start your bot and use the `/mint` command in Telegram. The bot will:
+
+- Read your token config
+- Mint on Base Sepolia testnet
+- Return contract details and token page URL
+
+> Note: Make sure you have set up your COLLABLAND_API_KEY and TELEGRAM_BOT_TOKEN in .env first.
