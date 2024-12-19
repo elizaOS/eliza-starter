@@ -8,6 +8,7 @@ Open `agent/src/character.ts` to modify the default character. Uncomment and edi
 
 To load custom characters instead:
 - Use `pnpm start --characters="path/to/your/character.json"`
+- To add secrets securely, create a `.env.{character name}` file in the `characters` directory (should match the character name defined in the character file)
 - Multiple character files can be loaded simultaneously
 
 ### Add clients
