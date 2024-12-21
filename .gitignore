@@ -3,5 +3,6 @@
 !character.ts
 .env
 node_modules
+pnpm-lock.yaml
 
 db.sqlite
