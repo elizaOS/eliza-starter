@@ -2,7 +2,7 @@
   "name": "Eliza",
   "plugins": [],
   "clients": [],
-  "modelProvider": "openrouter",
+  "modelProvider": "openai",
   "settings": {
     "secrets": {},
     "voice": {
