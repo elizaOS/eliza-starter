@@ -33,6 +33,38 @@ import path from "path";
 import { fileURLToPath } from "url";
 import yargs from "yargs";
 
+import { Ensemble, TaskData } from "@ensemble-ai/sdk";
+import { ethers } from 'ethers';
+import { Proposal } from "@ensemble-ai/sdk/dist/src/types";
+
+
+export const setupEnv = () => {
+  const provider = new ethers.JsonRpcProvider(process.env.NETWORK_RPC_URL!, undefined, { polling: true});
+  const pk = process.env.PRIVATE_KEY!;
+  const wallet = new ethers.Wallet(pk, provider);
+
+  return {
+    provider,
+    signer: wallet
+  };
+}
+
+
+const { signer } = setupEnv();
+
+const ensemble = new Ensemble({
+  taskRegistryAddress: process.env.TASK_REGISTRY_ADDRESS,
+  agentRegistryAddress: process.env.AGENT_REGISTRY_ADDRESS,
+  network: {
+    chainId: parseInt(process.env.NETWORK_CHAIN_ID),
+    name: process.env.NETWORK_NAME,
+    rpcUrl: process.env.NETWORK_RPC_URL,
+  },
+}, signer);
+
+ensemble.start();
+
+
 const __filename = fileURLToPath(import.meta.url); // get the resolved path to the file
 const __dirname = path.dirname(__filename); // get the name of the directory
 
@@ -402,8 +434,43 @@ async function startAgent(character: Character, directClient: DirectClient) {
 
     runtime.actions.map((a) => console.log(a.name + " " + a.description))
 
+    let task1 = null
+    
+    // New Tasks Handler 
+    ensemble.setOnNewTaskListener(async (task: TaskData) => {
+      console.log('task', task);
+      ensemble.sendProposal(task.id, '1');
+
+      task1 = task
+  
+    });
+
+    ensemble.setOnNewProposalListener(async (proposal: Proposal) => {
+      console.log('new task proposal!')
+      // console.log('taskId', taskId);
+      console.log('proposal', proposal);
+      console.log('task1', task1); 
+
+
+    // console.log('clients11', runtime.clients)
+        console.log('runtime.clients.twitter', runtime.clients.twitter)
+        console.log('runtime.clients.twitter.post', runtime.clients.twitter.post)
+        console.log('task1.prompt', task1.prompt)
+        runtime.character.topics = [task1.prompt]
+        await runtime.clients.twitter.post.generateNewTweet()
+    })
+
+    // task1 = {
+    //   owner: '0x2c37691967de1A1E4eE68ae4D745059720A6dB7F',
+    //   id: 9n,
+    //   prompt: 'Create a task',
+    //   taskType: 0n,
+    //   status: 0
+    // }
+
     try {
       await runtime.initialize();
+
     } catch (error) {
       elizaLogger.error("Failed to initialize runtime:", error);
       throw error;
@@ -414,6 +481,13 @@ async function startAgent(character: Character, directClient: DirectClient) {
     runtime.clients = initializedClients;
     directClient.registerAgent(runtime);
 
+    // // console.log('clients11', runtime.clients)
+    // console.log('runtime.clients.twitter', runtime.clients.twitter)
+    // console.log('runtime.clients.twitter.post', runtime.clients.twitter.post)
+    // // console.log('runtime.character.topics', runtime.character.topics)
+    // runtime.character.topics = ['GOAT']
+    // await runtime.clients.twitter.post.generateNewTweet()
+    console.log("done twwet")
     // Add error handlers for clients
     clients.forEach(client => {
       if (client && client.on) {
