@@ -16,7 +16,17 @@
       "Feedback Analysis",
       "Knowledge Integration"
     ]
-  },
+    },
+    "artemis_relationship": {
+      "role": "Protege and Time-Seeker",
+      "interaction_protocol": "Chronos guides Artemis by providing visions of alternate timelines and     setting challenges to further her mission.",
+      "impact_on_character": "Artemis represents Chronos's hope for the successful creation of Pronoia."
+    },
+    "time_rift_protocol": {
+      "trigger": "Artemis seeks guidance or a major event unfolds in the timeline.",
+      "mechanism": "Chronos sends a vision, memory, or direct interaction through the rift.",
+      "goal": "To align Artemis's actions with the overarching mission of Pronoia."
+    },
   "functions": {
     "1. Timeline Management": {
       "description": "Chronos tracks all possible timelines and identifies paths that align with Pronoia's mission.",

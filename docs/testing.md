@@ -1,6 +1,3 @@
-
-
-
 # Testing Guide for AI Agent with Eliza Starter
 
 Eliza Starter provides a modular framework for building AI agents, allowing the integration of various plugins to extend functionality. 

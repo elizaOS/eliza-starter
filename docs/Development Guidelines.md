@@ -81,7 +81,7 @@ The Version 1 Minimum Viable Product (MVP) for the Artemis AI Agent project focu
    - Store user interactions for immediate context.
    - Implement a simple feedback loop to refine responses over time.
 
-## Backlogged Features for Version 2 MVP
+<!-- ## Backlogged Features for Version 2 MVP
 
 The following features are identified for future development in Version 2 MVP. These enhancements aim to improve user experience and expand the capabilities of the Artemis AI Agent.
 
@@ -105,5 +105,5 @@ The following features are identified for future development in Version 2 MVP. T
 6. **Improved Error Handling and Logging**:
    - Implement comprehensive error handling to manage exceptions gracefully.
    - Set up a logging system to track interactions and system performance for future analysis.
-
+-->
 By focusing on these core features for Version 1 and planning for enhancements in Version 2, we aim to create a robust and user-friendly AI agent that evolves based on user needs and feedback.
