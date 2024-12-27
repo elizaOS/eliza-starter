@@ -12,9 +12,8 @@ To load custom characters instead:
 
 ### Add clients
 
-```diff
-- clients: [],
-+ clients: ["twitter", "discord"],
+```
+clients: ["twitter", "discord"]
 ```
 
 ## Duplicate the .env.example template
@@ -27,21 +26,15 @@ cp .env.example .env
 
 ### Add login credentials and keys to .env
 
-```diff
--DISCORD_APPLICATION_ID=
--DISCORD_API_TOKEN= # Bot token
-+DISCORD_APPLICATION_ID="000000772361146438"
-+DISCORD_API_TOKEN="OTk1MTU1NzcyMzYxMT000000.000000.00000000000000000000000000000000"
+```
+DISCORD_APPLICATION_ID="000000772361146438"
+DISCORD_API_TOKEN="OTk1MTU1NzcyMzYxMT000000.000000.00000000000000000000000000000000"
 ...
--OPENROUTER_API_KEY=
-+OPENROUTER_API_KEY="sk-xx-xx-xxx"
+OPENROUTER_API_KEY="sk-xx-xx-xxx"
 ...
--TWITTER_USERNAME= # Account username
--TWITTER_PASSWORD= # Account password
--TWITTER_EMAIL= # Account email
-+TWITTER_USERNAME="username"
-+TWITTER_PASSWORD="password"
-+TWITTER_EMAIL="your@email.com"
+TWITTER_USERNAME="username"
+TWITTER_PASSWORD="password"
+TWITTER_EMAIL="your@email.com"
 ```
 
 ## Install dependencies and start your agent
