@@ -1,4 +1,5 @@
 *.ts
+!tsup.config.ts
 !index.ts
 !character.ts
 .env
