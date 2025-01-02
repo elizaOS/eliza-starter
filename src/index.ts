@@ -33,9 +33,35 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { character } from "./character.ts";
 import type { DirectClient } from "@ai16z/client-direct";
+import { SupabaseDatabaseAdapter } from "@ai16z/adapter-supabase";
+import { createClient } from "@supabase/supabase-js";
 
 const __filename = fileURLToPath(import.meta.url); // get the resolved path to the file
 const __dirname = path.dirname(__filename); // get the name of the directory
+
+// Initialize Supabase client
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_KEY;
+const supabaseClient = createClient(supabaseUrl, supabaseKey);
+
+// Initialize Supabase database adapter
+function initializeDatabase(dataDir: string) {
+  if (process.env.SUPABASE_URL && process.env.SUPABASE_KEY) {
+    const supabaseClient = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+    const db = new SupabaseDatabaseAdapter(supabaseClient);
+    return db;
+  } else if (process.env.POSTGRES_URL) {
+    const db = new PostgresDatabaseAdapter({
+      connectionString: process.env.POSTGRES_URL,
+    });
+    return db;
+  } else {
+    const filePath =
+      process.env.SQLITE_FILE ?? path.resolve(dataDir, "db.sqlite");
+    const db = new SqliteDatabaseAdapter(new Database(filePath));
+    return db;
+  }
+}
 
 export const wait = (minTime: number = 1000, maxTime: number = 3000) => {
   const waitTime =
@@ -143,21 +169,6 @@ export function getTokenForProvider(
       );
     case ModelProviderName.GROQ:
       return character.settings?.secrets?.GROQ_API_KEY || settings.GROQ_API_KEY;
-  }
-}
-
-function initializeDatabase(dataDir: string) {
-  if (process.env.POSTGRES_URL) {
-    const db = new PostgresDatabaseAdapter({
-      connectionString: process.env.POSTGRES_URL,
-    });
-    return db;
-  } else {
-    const filePath =
-      process.env.SQLITE_FILE ?? path.resolve(dataDir, "db.sqlite");
-    // ":memory:";
-    const db = new SqliteDatabaseAdapter(new Database(filePath));
-    return db;
   }
 }
 

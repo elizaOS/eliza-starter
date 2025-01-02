@@ -8,7 +8,7 @@
   },
   "kv_store": {
     "unique_matched_lines_count": 0,
-    "total_repo_line_count": 17251,
+    "total_repo_line_count": 17997,
     "best_prompt_response": null,
     "file_statistics": [
       {
@@ -114,6 +114,18 @@
         "ai_generated_percentage": 0
       },
       {
+        "file": "docs/doc-templates/.next-steps copy.md",
+        "total_lines": 160,
+        "ai_generated_lines": 0,
+        "ai_generated_percentage": 0
+      },
+      {
+        "file": "docs/doc-templates/Development Guidelines-Template.md",
+        "total_lines": 109,
+        "ai_generated_lines": 0,
+        "ai_generated_percentage": 0
+      },
+      {
         "file": "docs/doc-templates/fyi-template.md",
         "total_lines": 121,
         "ai_generated_lines": 0,
@@ -139,13 +151,13 @@
       },
       {
         "file": "package.json",
-        "total_lines": 46,
+        "total_lines": 48,
         "ai_generated_lines": 0,
         "ai_generated_percentage": 0
       },
       {
         "file": "pnpm-lock.yaml",
-        "total_lines": 13470,
+        "total_lines": 13934,
         "ai_generated_lines": 0,
         "ai_generated_percentage": 0
       },
@@ -157,7 +169,7 @@
       },
       {
         "file": "src/index.ts",
-        "total_lines": 359,
+        "total_lines": 370,
         "ai_generated_lines": 0,
         "ai_generated_percentage": 0
       },
