@@ -80,6 +80,9 @@ importers:
       yargs:
         specifier: 17.7.2
         version: 17.7.2
+      zod:
+        specifier: 3.23.8
+        version: 3.23.8
     devDependencies:
       ts-node:
         specifier: 10.9.2
