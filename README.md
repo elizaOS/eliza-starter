@@ -14,7 +14,7 @@ To load custom characters instead:
 
 ```diff
 - clients: [],
-+ clients: ["twitter", "discord"],
++ clients: ["x", "discord"],
 ```
 
 ## Duplicate the .env.example template
