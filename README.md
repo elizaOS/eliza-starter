@@ -36,12 +36,12 @@ cp .env.example .env
 -OPENROUTER_API_KEY=
 +OPENROUTER_API_KEY="sk-xx-xx-xxx"
 ...
--TWITTER_USERNAME= # Account username
--TWITTER_PASSWORD= # Account password
--TWITTER_EMAIL= # Account email
-+TWITTER_USERNAME="username"
-+TWITTER_PASSWORD="password"
-+TWITTER_EMAIL="your@email.com"
+-X_USERNAME= # Account username
+-X_PASSWORD= # Account password
+-X_EMAIL= # Account email
++X_USERNAME="username"
++X_PASSWORD="password"
++X_EMAIL="your@email.com"
 ```
 
 ## Install dependencies and start your agent
