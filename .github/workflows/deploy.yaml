@@ -1,0 +1,35 @@
+name: build-and-push-docker
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: check out repo
+        uses: actions/checkout@v3
+
+      - name: set up node
+        uses: actions/setup-node@v3
+        with:
+          node-version: 23
+
+      - name: install pnpm
+        run: npm install -g pnpm
+
+      - name: install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: build
+        run: pnpm build
+
+      - name: log in to docker hub
+        run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+
+      - name: build docker image
+        run: docker build -t boohyunsik/doodle-welcome-agent:latest .
+
+      - name: push docker image
+        run: docker push boohyunsik/doodle-welcome-agent:latest
