@@ -7,7 +7,7 @@
   "main": "src/index.ts",
   "type": "module",
   "scripts": {
-    "build": "tsup --project tsconfig.json --format esm --dts",
+    "build": "tsup src/**/*.ts --format esm,cjs --dts",
     "start": "tsc --project tsconfig.json && node --loader ts-node/esm src/index.ts",
     "dev": "nodemon --watch src -e ts,json --exec \"node --loader ts-node/esm src/index.ts\"",
     "start:client": "pnpm --dir client dev",
@@ -48,6 +48,7 @@
     }
   },
   "devDependencies": {
+    "@types/node": "22.8.4",
     "nodemon": "^3.1.9",
     "ts-node": "10.9.2",
     "tsup": "8.3.5",
