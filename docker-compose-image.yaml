@@ -1,0 +1,31 @@
+services:
+    eliza:
+        platform: linux/amd64
+        command: ["pnpm", "start", "--character=./characters/eliza.character.json"]
+        image: eliza-starter:v1
+        stdin_open: true
+        tty: true
+        volumes:
+            - ./data:/app/data
+        environment:
+            - DISCORD_APPLICATION_ID=
+            - DISCORD_API_TOKEN=
+            - REDPILL_API_KEY=
+            - REDPILL_MODEL=
+            - ELEVENLABS_XI_API_KEY=
+            - ELEVENLABS_MODEL_ID=eleven_multilingual_v2
+            - ELEVENLABS_VOICE_ID=21m00Tcm4TlvDq8ikWAM
+            - ELEVENLABS_VOICE_STABILITY=0.5
+            - ELEVENLABS_VOICE_SIMILARITY_BOOST=0.9
+            - ELEVENLABS_VOICE_STYLE=0.66
+            - ELEVENLABS_VOICE_USE_SPEAKER_BOOST=false
+            - ELEVENLABS_OPTIMIZE_STREAMING_LATENCY=4
+            - ELEVENLABS_OUTPUT_FORMAT=pcm_16000
+            - SOL_ADDRESS=So11111111111111111111111111111111111111112
+            - SLIPPAGE=1
+            - SOLANA_RPC_URL=https://api.mainnet-beta.solana.com
+            - HELIUS_API_KEY=
+            - SERVER_PORT=3000
+        ports:
+            - "3000:3000"
+        restart: always
