@@ -8,3 +8,4 @@ dist/
 
 db.sqlite
 .idea
+.turbo

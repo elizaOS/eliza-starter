@@ -1,3 +1,21 @@
+# Twitter readonly plugin
+
+This repository aims to showcase how twitter readonly plugin can be implemented in Eliza. It also utilises RAG knowledge to answer questions about the scraped data, as well as has the ability to share RAG knowledge with other agents. 
+
+In order to test this out, copy .env.example to .env and add the following .env details:
+
+```
+OPENAI_API_KEY=your_openai_api_key
+TWITTER_USERNAME=your_username
+TWITTER_PASSWORD=your_password
+TWITTER_EMAIL=your_email
+TWITTER_TARGET_ACCOUNTS=target_account_1
+```
+
+Then run `pnpm install` to install the dependencies.
+
+To start the agent, run `pnpm start`.
+
 # Eliza
 
 ## Edit the character files
