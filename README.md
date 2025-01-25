@@ -42,6 +42,8 @@ TWITTER_EMAIL="your@email.com"
 ## Install dependencies and start your agent
 
 ```bash
+mise trust mise.toml
+mise install
 pnpm i && pnpm start
 ```
 Note: this requires node to be at least version 22 when you install packages and run the agent.
