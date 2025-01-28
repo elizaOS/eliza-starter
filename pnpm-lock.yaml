@@ -12,8 +12,8 @@ importers:
   .:
     dependencies:
       '@elizaos/adapter-postgres':
-        specifier: 0.1.7
-        version: 0.1.7(@google-cloud/vertexai@1.9.2)(@langchain/core@0.3.30(openai@4.73.0(zod@3.23.8)))(axios@1.7.9)(react@19.0.0)(sswr@2.1.0(svelte@5.18.0))(svelte@5.18.0)(vue@3.5.13(typescript@5.6.3))
+        specifier: 0.1.8
+        version: 0.1.8(@google-cloud/vertexai@1.9.2)(@langchain/core@0.3.30(openai@4.73.0(zod@3.23.8)))(axios@1.7.9)(react@19.0.0)(sswr@2.1.0(svelte@5.18.0))(svelte@5.18.0)(vue@3.5.13(typescript@5.6.3))
       '@elizaos/adapter-sqlite':
         specifier: 0.1.7
         version: 0.1.7(@google-cloud/vertexai@1.9.2)(@langchain/core@0.3.30(openai@4.73.0(zod@3.23.8)))(axios@1.7.9)(react@19.0.0)(sswr@2.1.0(svelte@5.18.0))(svelte@5.18.0)(vue@3.5.13(typescript@5.6.3))(whatwg-url@14.1.0)
@@ -128,6 +128,12 @@ packages:
     peerDependencies:
       zod: ^3.0.0
 
+  '@ai-sdk/mistral@1.1.5':
+    resolution: {integrity: sha512-Knofe2cAURWaunECx9HP+darFe6MJ7CaZ0sW/JRgqCOxSDzRDi3hr9Xr4GGHJu0JoDb5+bUOV0J+2kPHbVKyxQ==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      zod: ^3.0.0
+
   '@ai-sdk/openai@1.0.5':
     resolution: {integrity: sha512-JDCPBJQx9o3LgboBPaA55v+9EZ7Vm/ozy0+J5DIr2jJF8WETjeCnigdxixyzEy/Od4wX871jOTSuGffwNIi0kA==}
     engines: {node: '>=18'}
@@ -161,6 +167,15 @@ packages:
       zod:
         optional: true
 
+  '@ai-sdk/provider-utils@2.1.5':
+    resolution: {integrity: sha512-PcNR7E4ovZGV/J47gUqaFlvzorgca6uUfN5WzfXJSFWeOeLunN+oxRVwgUOwj0zbmO0yGQTHQD+FHVw8s3Rz8w==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      zod: ^3.0.0
+    peerDependenciesMeta:
+      zod:
+        optional: true
+
   '@ai-sdk/provider@0.0.24':
     resolution: {integrity: sha512-XMsNGJdGO+L0cxhhegtqZ8+T6nn4EoShS819OvCgI2kLbYTIvk0GWFGD0AXJmxkxs3DrpsJxKAFukFR7bvTkgQ==}
     engines: {node: '>=18'}
@@ -171,6 +186,10 @@ packages:
 
   '@ai-sdk/provider@1.0.1':
     resolution: {integrity: sha512-mV+3iNDkzUsZ0pR2jG0sVzU6xtQY5DtSCBy3JFycLp6PwjyLw/iodfL3MwdmMCRJWgs3dadcHejRnMvF9nGTBg==}
+    engines: {node: '>=18'}
+
+  '@ai-sdk/provider@1.0.6':
+    resolution: {integrity: sha512-hwj/gFNxpDgEfTaYzCYoslmw01IY9kWLKl/wf8xuPvHtQIzlfXWmmUwc8PnCwxyt8cKzIuV0dfUghCf68HQ0SA==}
     engines: {node: '>=18'}
 
   '@ai-sdk/react@0.0.70':
@@ -585,9 +604,9 @@ packages:
     resolution: {integrity: sha512-YJOVVZ545x24mHzANfYoy0BJX5PDyeZlpiJjDkUBM/V/Ao7TFX9lcUvCN4nr0tbr5ubeaXxtEBILUrHtTphVeQ==}
     hasBin: true
 
-  '@discordjs/opus@https://codeload.github.com/discordjs/opus/tar.gz/31da49d8d2cc6c5a2ab1bfd332033ff7d5f9fb02':
-    resolution: {tarball: https://codeload.github.com/discordjs/opus/tar.gz/31da49d8d2cc6c5a2ab1bfd332033ff7d5f9fb02}
-    version: 0.9.0
+  '@discordjs/opus@https://codeload.github.com/discordjs/opus/tar.gz/8c727579cd81831f6e866f8d82781b4bfa5f4063':
+    resolution: {tarball: https://codeload.github.com/discordjs/opus/tar.gz/8c727579cd81831f6e866f8d82781b4bfa5f4063}
+    version: 0.10.0
     engines: {node: '>=12.0.0'}
 
   '@discordjs/rest@2.4.0':
@@ -658,8 +677,8 @@ packages:
     peerDependencies:
       onnxruntime-node: 1.20.0
 
-  '@elizaos/adapter-postgres@0.1.7':
-    resolution: {integrity: sha512-qPkM3umNa7+URIuqOxfN7zYURrEdTt9/+JRMSeZQOQ+vG6sSiiuv4MzNm75DCfw1yG4bHSBv+omYnWlJhOGSHg==}
+  '@elizaos/adapter-postgres@0.1.8':
+    resolution: {integrity: sha512-go5IvIE9dbM+pIK8J8ScXFPLPfItkUpMLJ7XbImcnEc8e2KHOeqWZ/bLAMpktGI716m/dESeUEaYMBnkwcE4vQ==}
 
   '@elizaos/adapter-sqlite@0.1.7':
     resolution: {integrity: sha512-jBA2Oj/2t0bDdxc35E9o8fiW9coYl9JNVgVa63jBVIULdZpnCmyivWMr1N8wqy5dBTSod31TxZPqd5fYY4HLbg==}
@@ -691,6 +710,9 @@ packages:
 
   '@elizaos/core@0.1.7':
     resolution: {integrity: sha512-oorLGxE0LAdboNFhf62erTxu0+woNHZn98at/X3caDX34Fxr+d1cRQ6/W34WPAOIlv1tg3Q0ZArcpCCOaDTcMw==}
+
+  '@elizaos/core@0.1.8':
+    resolution: {integrity: sha512-nQT5uQTQVTZJ3CrhVkK4dRdP/RuBMiOv/u3JZvMJGhY45z0Gy0gY27NEn/BBlJ4Ymt/SmqtXOul/x2hOeQen4Q==}
 
   '@elizaos/plugin-bootstrap@0.1.7':
     resolution: {integrity: sha512-mikDyTVvTGqH5IObwl288vf1LZaWf6Xx37Z2YcwpIWkqMwT6pcU4+riRExV/JhiEnVQcq4hA9avpEujIiEq2IQ==}
@@ -6493,6 +6515,12 @@ snapshots:
       '@ai-sdk/provider-utils': 1.0.22(zod@3.23.8)
       zod: 3.23.8
 
+  '@ai-sdk/mistral@1.1.5(zod@3.23.8)':
+    dependencies:
+      '@ai-sdk/provider': 1.0.6
+      '@ai-sdk/provider-utils': 2.1.5(zod@3.23.8)
+      zod: 3.23.8
+
   '@ai-sdk/openai@1.0.5(zod@3.23.8)':
     dependencies:
       '@ai-sdk/provider': 1.0.1
@@ -6526,6 +6554,15 @@ snapshots:
     optionalDependencies:
       zod: 3.23.8
 
+  '@ai-sdk/provider-utils@2.1.5(zod@3.23.8)':
+    dependencies:
+      '@ai-sdk/provider': 1.0.6
+      eventsource-parser: 3.0.0
+      nanoid: 3.3.8
+      secure-json-parse: 2.7.0
+    optionalDependencies:
+      zod: 3.23.8
+
   '@ai-sdk/provider@0.0.24':
     dependencies:
       json-schema: 0.4.0
@@ -6535,6 +6572,10 @@ snapshots:
       json-schema: 0.4.0
 
   '@ai-sdk/provider@1.0.1':
+    dependencies:
+      json-schema: 0.4.0
+
+  '@ai-sdk/provider@1.0.6':
     dependencies:
       json-schema: 0.4.0
 
@@ -7468,7 +7509,7 @@ snapshots:
       - encoding
       - supports-color
 
-  '@discordjs/opus@https://codeload.github.com/discordjs/opus/tar.gz/31da49d8d2cc6c5a2ab1bfd332033ff7d5f9fb02':
+  '@discordjs/opus@https://codeload.github.com/discordjs/opus/tar.gz/8c727579cd81831f6e866f8d82781b4bfa5f4063':
     dependencies:
       '@discordjs/node-pre-gyp': 0.4.5
       node-addon-api: 8.3.0
@@ -7502,11 +7543,11 @@ snapshots:
 
   '@discordjs/util@1.1.1': {}
 
-  '@discordjs/voice@0.17.0(@discordjs/opus@https://codeload.github.com/discordjs/opus/tar.gz/31da49d8d2cc6c5a2ab1bfd332033ff7d5f9fb02)(bufferutil@4.0.9)(ffmpeg-static@5.2.0)(utf-8-validate@5.0.10)':
+  '@discordjs/voice@0.17.0(@discordjs/opus@https://codeload.github.com/discordjs/opus/tar.gz/8c727579cd81831f6e866f8d82781b4bfa5f4063)(bufferutil@4.0.9)(ffmpeg-static@5.2.0)(utf-8-validate@5.0.10)':
     dependencies:
       '@types/ws': 8.5.13
       discord-api-types: 0.37.83
-      prism-media: 1.3.5(@discordjs/opus@https://codeload.github.com/discordjs/opus/tar.gz/31da49d8d2cc6c5a2ab1bfd332033ff7d5f9fb02)(ffmpeg-static@5.2.0)
+      prism-media: 1.3.5(@discordjs/opus@https://codeload.github.com/discordjs/opus/tar.gz/8c727579cd81831f6e866f8d82781b4bfa5f4063)(ffmpeg-static@5.2.0)
       tslib: 2.8.1
       ws: 8.18.0(bufferutil@4.0.9)(utf-8-validate@5.0.10)
     transitivePeerDependencies:
@@ -7563,9 +7604,9 @@ snapshots:
       '@huggingface/jinja': 0.2.2
       onnxruntime-node: 1.20.0
 
-  '@elizaos/adapter-postgres@0.1.7(@google-cloud/vertexai@1.9.2)(@langchain/core@0.3.30(openai@4.73.0(zod@3.23.8)))(axios@1.7.9)(react@19.0.0)(sswr@2.1.0(svelte@5.18.0))(svelte@5.18.0)(vue@3.5.13(typescript@5.6.3))':
+  '@elizaos/adapter-postgres@0.1.8(@google-cloud/vertexai@1.9.2)(@langchain/core@0.3.30(openai@4.73.0(zod@3.23.8)))(axios@1.7.9)(react@19.0.0)(sswr@2.1.0(svelte@5.18.0))(svelte@5.18.0)(vue@3.5.13(typescript@5.6.3))':
     dependencies:
-      '@elizaos/core': 0.1.7(@google-cloud/vertexai@1.9.2)(@langchain/core@0.3.30(openai@4.73.0(zod@3.23.8)))(axios@1.7.9)(react@19.0.0)(sswr@2.1.0(svelte@5.18.0))(svelte@5.18.0)(vue@3.5.13(typescript@5.6.3))
+      '@elizaos/core': 0.1.8(@google-cloud/vertexai@1.9.2)(@langchain/core@0.3.30(openai@4.73.0(zod@3.23.8)))(axios@1.7.9)(react@19.0.0)(sswr@2.1.0(svelte@5.18.0))(svelte@5.18.0)(vue@3.5.13(typescript@5.6.3))
       '@types/pg': 8.11.10
       pg: 8.13.1
     transitivePeerDependencies:
@@ -7702,14 +7743,14 @@ snapshots:
 
   '@elizaos/client-discord@0.1.7(@google-cloud/vertexai@1.9.2)(@langchain/core@0.3.30(openai@4.73.0(zod@3.23.8)))(axios@1.7.9)(bufferutil@4.0.9)(canvas@2.11.2)(ffmpeg-static@5.2.0)(onnxruntime-node@1.20.0)(puppeteer-core@19.11.1(bufferutil@4.0.9)(typescript@5.6.3)(utf-8-validate@5.0.10))(puppeteer@19.11.1(bufferutil@4.0.9)(typescript@5.6.3)(utf-8-validate@5.0.10))(react@19.0.0)(sswr@2.1.0(svelte@5.18.0))(svelte@5.18.0)(typescript@5.6.3)(utf-8-validate@5.0.10)(vue@3.5.13(typescript@5.6.3))(whatwg-url@14.1.0)':
     dependencies:
-      '@discordjs/opus': https://codeload.github.com/discordjs/opus/tar.gz/31da49d8d2cc6c5a2ab1bfd332033ff7d5f9fb02
+      '@discordjs/opus': https://codeload.github.com/discordjs/opus/tar.gz/8c727579cd81831f6e866f8d82781b4bfa5f4063
       '@discordjs/rest': 2.4.0
-      '@discordjs/voice': 0.17.0(@discordjs/opus@https://codeload.github.com/discordjs/opus/tar.gz/31da49d8d2cc6c5a2ab1bfd332033ff7d5f9fb02)(bufferutil@4.0.9)(ffmpeg-static@5.2.0)(utf-8-validate@5.0.10)
+      '@discordjs/voice': 0.17.0(@discordjs/opus@https://codeload.github.com/discordjs/opus/tar.gz/8c727579cd81831f6e866f8d82781b4bfa5f4063)(bufferutil@4.0.9)(ffmpeg-static@5.2.0)(utf-8-validate@5.0.10)
       '@elizaos/core': 0.1.7(@google-cloud/vertexai@1.9.2)(@langchain/core@0.3.30(openai@4.73.0(zod@3.23.8)))(axios@1.7.9)(react@19.0.0)(sswr@2.1.0(svelte@5.18.0))(svelte@5.18.0)(vue@3.5.13(typescript@5.6.3))
       '@elizaos/plugin-node': 0.1.7(@google-cloud/vertexai@1.9.2)(@langchain/core@0.3.30(openai@4.73.0(zod@3.23.8)))(axios@1.7.9)(bufferutil@4.0.9)(canvas@2.11.2)(onnxruntime-node@1.20.0)(puppeteer-core@19.11.1(bufferutil@4.0.9)(typescript@5.6.3)(utf-8-validate@5.0.10))(puppeteer@19.11.1(bufferutil@4.0.9)(typescript@5.6.3)(utf-8-validate@5.0.10))(react@19.0.0)(sswr@2.1.0(svelte@5.18.0))(svelte@5.18.0)(typescript@5.6.3)(utf-8-validate@5.0.10)(vue@3.5.13(typescript@5.6.3))(whatwg-url@14.1.0)(zod@3.23.8)
       discord.js: 14.16.3(bufferutil@4.0.9)(utf-8-validate@5.0.10)
       libsodium-wrappers: 0.7.15
-      prism-media: 1.3.5(@discordjs/opus@https://codeload.github.com/discordjs/opus/tar.gz/31da49d8d2cc6c5a2ab1bfd332033ff7d5f9fb02)(ffmpeg-static@5.2.0)
+      prism-media: 1.3.5(@discordjs/opus@https://codeload.github.com/discordjs/opus/tar.gz/8c727579cd81831f6e866f8d82781b4bfa5f4063)(ffmpeg-static@5.2.0)
       whatwg-url: 14.1.0
       zod: 3.23.8
     transitivePeerDependencies:
@@ -7818,6 +7859,57 @@ snapshots:
       '@ai-sdk/google': 0.0.55(zod@3.23.8)
       '@ai-sdk/google-vertex': 0.0.43(@google-cloud/vertexai@1.9.2)(zod@3.23.8)
       '@ai-sdk/groq': 0.0.3(zod@3.23.8)
+      '@ai-sdk/openai': 1.0.5(zod@3.23.8)
+      '@anthropic-ai/sdk': 0.30.1
+      '@fal-ai/client': 1.2.0
+      '@types/uuid': 10.0.0
+      ai: 3.4.33(openai@4.73.0(zod@3.23.8))(react@19.0.0)(sswr@2.1.0(svelte@5.18.0))(svelte@5.18.0)(vue@3.5.13(typescript@5.6.3))(zod@3.23.8)
+      anthropic-vertex-ai: 1.0.2(zod@3.23.8)
+      fastembed: 1.14.1
+      fastestsmallesttextencoderdecoder: 1.0.22
+      gaxios: 6.7.1
+      glob: 11.0.0
+      handlebars: 4.7.8
+      js-sha1: 0.7.0
+      js-tiktoken: 1.0.15
+      langchain: 0.3.6(@langchain/core@0.3.30(openai@4.73.0(zod@3.23.8)))(axios@1.7.9)(handlebars@4.7.8)(openai@4.73.0(zod@3.23.8))
+      ollama-ai-provider: 0.16.1(zod@3.23.8)
+      openai: 4.73.0(zod@3.23.8)
+      tinyld: 1.3.4
+      together-ai: 0.7.0
+      unique-names-generator: 4.7.1
+      uuid: 11.0.3
+      zod: 3.23.8
+    transitivePeerDependencies:
+      - '@google-cloud/vertexai'
+      - '@langchain/anthropic'
+      - '@langchain/aws'
+      - '@langchain/cohere'
+      - '@langchain/core'
+      - '@langchain/google-genai'
+      - '@langchain/google-vertexai'
+      - '@langchain/groq'
+      - '@langchain/mistralai'
+      - '@langchain/ollama'
+      - axios
+      - cheerio
+      - encoding
+      - peggy
+      - react
+      - solid-js
+      - sswr
+      - supports-color
+      - svelte
+      - typeorm
+      - vue
+
+  '@elizaos/core@0.1.8(@google-cloud/vertexai@1.9.2)(@langchain/core@0.3.30(openai@4.73.0(zod@3.23.8)))(axios@1.7.9)(react@19.0.0)(sswr@2.1.0(svelte@5.18.0))(svelte@5.18.0)(vue@3.5.13(typescript@5.6.3))':
+    dependencies:
+      '@ai-sdk/anthropic': 0.0.56(zod@3.23.8)
+      '@ai-sdk/google': 0.0.55(zod@3.23.8)
+      '@ai-sdk/google-vertex': 0.0.43(@google-cloud/vertexai@1.9.2)(zod@3.23.8)
+      '@ai-sdk/groq': 0.0.3(zod@3.23.8)
+      '@ai-sdk/mistral': 1.1.5(zod@3.23.8)
       '@ai-sdk/openai': 1.0.5(zod@3.23.8)
       '@anthropic-ai/sdk': 0.30.1
       '@fal-ai/client': 1.2.0
@@ -8607,17 +8699,17 @@ snapshots:
   '@langchain/openai@0.3.17(@langchain/core@0.3.30(openai@4.73.0(zod@3.23.8)))':
     dependencies:
       '@langchain/core': 0.3.30(openai@4.73.0(zod@3.23.8))
-      js-tiktoken: 1.0.15
-      openai: 4.78.1(zod@3.23.8)
-      zod: 3.23.8
-      zod-to-json-schema: 3.24.1(zod@3.23.8)
+      js-tiktoken: 1.0.16
+      openai: 4.78.1(zod@3.24.1)
+      zod: 3.24.1
+      zod-to-json-schema: 3.24.1(zod@3.24.1)
     transitivePeerDependencies:
       - encoding
 
   '@langchain/textsplitters@0.1.0(@langchain/core@0.3.30(openai@4.73.0(zod@3.23.8)))':
     dependencies:
       '@langchain/core': 0.3.30(openai@4.73.0(zod@3.23.8))
-      js-tiktoken: 1.0.15
+      js-tiktoken: 1.0.16
 
   '@mapbox/node-pre-gyp@1.0.11':
     dependencies:
@@ -9784,7 +9876,7 @@ snapshots:
 
   '@types/node-fetch@2.6.12':
     dependencies:
-      '@types/node': 18.19.70
+      '@types/node': 22.10.6
       form-data: 4.0.1
 
   '@types/node@10.17.60': {}
@@ -9839,7 +9931,7 @@ snapshots:
 
   '@types/ws@7.4.7':
     dependencies:
-      '@types/node': 12.20.55
+      '@types/node': 22.10.6
 
   '@types/ws@8.5.13':
     dependencies:
@@ -11236,7 +11328,7 @@ snapshots:
 
   extract-zip@2.0.1:
     dependencies:
-      debug: 4.3.4
+      debug: 4.4.0
       get-stream: 5.2.0
       yauzl: 2.10.0
     optionalDependencies:
@@ -12071,7 +12163,7 @@ snapshots:
       '@langchain/core': 0.3.30(openai@4.73.0(zod@3.23.8))
       '@langchain/openai': 0.3.17(@langchain/core@0.3.30(openai@4.73.0(zod@3.23.8)))
       '@langchain/textsplitters': 0.1.0(@langchain/core@0.3.30(openai@4.73.0(zod@3.23.8)))
-      js-tiktoken: 1.0.15
+      js-tiktoken: 1.0.16
       js-yaml: 4.1.0
       jsonpointer: 5.0.1
       langsmith: 0.2.15(openai@4.73.0(zod@3.23.8))
@@ -12079,8 +12171,8 @@ snapshots:
       p-retry: 4.6.2
       uuid: 10.0.0
       yaml: 2.7.0
-      zod: 3.23.8
-      zod-to-json-schema: 3.24.1(zod@3.23.8)
+      zod: 3.24.1
+      zod-to-json-schema: 3.24.1(zod@3.24.1)
     optionalDependencies:
       axios: 1.7.9
       handlebars: 4.7.8
@@ -12632,6 +12724,20 @@ snapshots:
     transitivePeerDependencies:
       - encoding
 
+  openai@4.78.1(zod@3.24.1):
+    dependencies:
+      '@types/node': 18.19.70
+      '@types/node-fetch': 2.6.12
+      abort-controller: 3.0.0
+      agentkeepalive: 4.6.0
+      form-data-encoder: 1.7.2
+      formdata-node: 4.4.1
+      node-fetch: 2.7.0
+    optionalDependencies:
+      zod: 3.24.1
+    transitivePeerDependencies:
+      - encoding
+
   openapi-types@12.1.3: {}
 
   ora@8.1.1:
@@ -12654,7 +12760,7 @@ snapshots:
     dependencies:
       '@adraffy/ens-normalize': 1.11.0
       '@noble/curves': 1.7.0
-      '@noble/hashes': 1.6.1
+      '@noble/hashes': 1.7.0
       '@scure/bip32': 1.6.0
       '@scure/bip39': 1.5.0
       abitype: 1.0.7(typescript@5.6.3)(zod@3.23.8)
@@ -13023,9 +13129,9 @@ snapshots:
     dependencies:
       parse-ms: 4.0.0
 
-  prism-media@1.3.5(@discordjs/opus@https://codeload.github.com/discordjs/opus/tar.gz/31da49d8d2cc6c5a2ab1bfd332033ff7d5f9fb02)(ffmpeg-static@5.2.0):
+  prism-media@1.3.5(@discordjs/opus@https://codeload.github.com/discordjs/opus/tar.gz/8c727579cd81831f6e866f8d82781b4bfa5f4063)(ffmpeg-static@5.2.0):
     optionalDependencies:
-      '@discordjs/opus': https://codeload.github.com/discordjs/opus/tar.gz/31da49d8d2cc6c5a2ab1bfd332033ff7d5f9fb02
+      '@discordjs/opus': https://codeload.github.com/discordjs/opus/tar.gz/8c727579cd81831f6e866f8d82781b4bfa5f4063
       ffmpeg-static: 5.2.0
 
   process-nextick-args@2.0.1: {}
@@ -14383,7 +14489,7 @@ snapshots:
   webauthn-p256@0.0.10:
     dependencies:
       '@noble/curves': 1.7.0
-      '@noble/hashes': 1.6.1
+      '@noble/hashes': 1.7.0
     optional: true
 
   webidl-conversions@3.0.1: {}
