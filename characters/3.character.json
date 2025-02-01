@@ -7,9 +7,9 @@
         "model": "None"
     },
     "agentRole": {
-        "type": "SOL",
+        "type": "DISC",
         "name": "Celine",
-        "description": "Solana enthusiast and performance expert"
+        "description": "Solana maximalist"
     },
     "environment": {
         "type": "crypto_debate",

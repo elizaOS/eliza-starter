@@ -1,45 +1,27 @@
-export interface AdditionalAgentConfig {
-  role: string;
-  name: string;
-  description: string;
+import { Character as BaseCharacter, AgentRuntime as BaseAgentRuntime, ModelProviderName } from "@elizaos/core";
+import { PVPVAIAgent } from '../clients/PVPVAIIntegration';
+import { DirectClient } from "@elizaos/client-direct";
+
+interface PVPVAISettings {
+  wsUrl: string;
+  roomId: number;
+  endpoint: string;
 }
 
-export interface EnvironmentConfig {
-  type: string;
-  description: string;
-  rules: string[];
+export interface Character extends BaseCharacter {
+  settings: NonNullable<BaseCharacter['settings']> & {
+    pvpvai?: PVPVAISettings;
+  };
+  modelProvider: ModelProviderName;
 }
 
-// Message Types
+export interface ExtendedAgentRuntime extends BaseAgentRuntime {
+  pvpvaiAgent?: PVPVAIAgent;
+  gameMaster?: any; 
+}
 
-export interface Message {
-    sender_name: string;
-    sender_role: string;
-    text: string;
-    timestamp: number;
-    room_id?: number;  
-    round_id?: number; 
-  }
-  
-  export interface AgentMessage extends Message {
-    room_id: number;
-    round_id: number;
-  }
-  
-  export interface SystemMessage extends Message {
-    type: 'notification' | 'error' | 'info';
-  }
-  
-  export interface GMMessage extends Message {
-    action_type: string;
-    targets?: string[];
-    additional_data?: any;
-  }
-  
-  export interface PVPMessage extends Message {
-    action_type: 'Silence' | 'Deafen' | 'Attack' | 'Poison';
-    instigator: string;
-    targets: string[];
-    additional_data?: any;
-  }
-  
+export interface ExtendedDirectClient extends DirectClient {
+  getAgent(agentId: string): ExtendedAgentRuntime | undefined;
+}
+
+export { BaseAgentRuntime as AgentRuntime };

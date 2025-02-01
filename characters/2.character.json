@@ -7,9 +7,9 @@
         "model": "None"
     },
     "agentRole": {
-        "type": "ETH",
+        "type": "DISC",
         "name": "Batman",
-        "description": "Ethereum advocate and smart contract expert"
+        "description": "Ethereum maximalist"
     },
     "environment": {
         "type": "crypto_debate",

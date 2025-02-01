@@ -2,9 +2,9 @@
     "name": "one",
     "username": "one",
     "agentRole": {
-        "type": "BTC",
+        "type": "DISC",
         "name": "Alfred",
-        "description": "Bitcoin maximalist and security expert"
+        "description": "Bitcoin maximalist"
     },
     "environment": {
         "type": "crypto_debate",

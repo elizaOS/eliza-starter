@@ -88,3 +88,6 @@ services:
 ```bash
 docker compose -f docker-compose-image.yaml up
 ```
+
+pnpm start --characters="characters/1.character.json"
+pnpm start --characters="characters/gamemaster.character.json"

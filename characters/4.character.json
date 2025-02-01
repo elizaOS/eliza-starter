@@ -7,9 +7,9 @@
         "model": "None"
     },
     "agentRole": {
-        "type": "AVAX",
+        "type": "DISC",
         "name": "Dolo",
-        "description": "Avalanche advocate and scaling solutions expert"
+        "description": "Avalanche maximalist"
     },
     "environment": {
         "type": "crypto_debate",

@@ -1,11 +1,11 @@
-import { DirectClient } from "@elizaos/client-direct";
+import { DirectClient as BaseDirectClient } from "@elizaos/client-direct";
 import {
-  AgentRuntime,
   elizaLogger,
   settings,
   stringToUuid,
-  type Character,
+  AgentRuntime as CoreAgentRuntime
 } from "@elizaos/core";
+import { type Character, type ExtendedAgentRuntime, AgentRuntime } from "./types";
 import { bootstrapPlugin } from "@elizaos/plugin-bootstrap";
 import { createNodePlugin } from "@elizaos/plugin-node";
 import { solanaPlugin } from "@elizaos/plugin-solana";
@@ -23,6 +23,7 @@ import {
   parseArguments,
 } from "./config/index.ts";
 import { initializeDatabase } from "./database/index.ts";
+import { PVPVAIAgent, PVPVAIGameMaster } from './clients/PVPVAIIntegration';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -65,10 +66,10 @@ export function createAgent(
     services: [],
     managers: [],
     cacheManager: cache,
-  });
+  }) as ExtendedAgentRuntime;
 }
 
-async function startAgent(character: Character, directClient: DirectClient) {
+async function startAgent(character: Character, directClient: ExtendedDirectClient) {
   try {
     character.id ??= stringToUuid(character.name);
     character.username ??= character.name;
@@ -90,6 +91,18 @@ async function startAgent(character: Character, directClient: DirectClient) {
     await runtime.initialize();
 
     runtime.clients = await initializeClients(character, runtime);
+
+    // Initialize PVP/VAI integration if configured
+    if (character.settings?.pvpvai) {
+      const config = {
+        wsUrl: character.settings.pvpvai.wsUrl,
+        roomId: character.settings.pvpvai.roomId,
+        endpoint: character.settings.pvpvai.endpoint,
+        agentId: parseInt(runtime.agentId)
+      };
+      
+      runtime.pvpvaiAgent = new PVPVAIAgent(config);
+    }
 
     directClient.registerAgent(runtime);
 
@@ -126,8 +139,88 @@ const checkPortAvailable = (port: number): Promise<boolean> => {
   });
 };
 
+// Update the declaration without protected modifier
+declare module '@elizaos/client-direct' {
+  interface DirectClient {
+    getAgent(agentId: string): CoreAgentRuntime;
+  }
+}
+
+class ExtendedDirectClient extends BaseDirectClient {
+  constructor() {
+    super();
+    
+    // Add PVP/VAI endpoints
+    this.app.post("/:agentId/pvp/action", async (req, res) => {
+      const agentId = req.params.agentId;
+      const runtime = this.getAgent(agentId) as ExtendedAgentRuntime;
+      
+      if (!runtime?.pvpvaiAgent) {
+        res.status(404).send("Agent not found or PVP/VAI not configured");
+        return;
+      }
+
+      try {
+        await runtime.pvpvaiAgent.handleMessage(req.body);
+        res.json({ success: true });
+      } catch (error) {
+        res.status(500).json({
+          error: "Error processing PVP action",
+          details: error.message
+        });
+      }
+    });
+
+    this.app.post("/:agentId/pvp/status", async (req, res) => {
+      const agentId = req.params.agentId;
+      const runtime = this.getAgent(agentId) as ExtendedAgentRuntime;
+      
+      if (!runtime || !runtime.pvpvaiAgent) {
+        res.status(404).send("Agent not found or PVP/VAI not configured");
+        return;
+      }
+
+      try {
+        runtime.pvpvaiAgent.updatePvPStatus(req.body);
+        res.json({ success: true });
+      } catch (error) {
+        res.status(500).json({
+          error: "Error updating PVP status",
+          details: error.message
+        });
+      }
+    });
+
+    this.app.post("/:agentId/gm/action", async (req, res) => {
+      const agentId = req.params.agentId;
+      const runtime = this.getAgent(agentId) as ExtendedAgentRuntime;
+      
+      if (!runtime || !runtime.gameMaster) {
+        res.status(404).send("Agent not found or GameMaster not configured");
+        return;
+      }
+
+      try {
+        await runtime.gameMaster.handleMessage(req.body);
+        res.json({ success: true });
+      } catch (error) {
+        res.status(500).json({
+          error: "Error processing GM action",
+          details: error.message
+        });
+      }
+    });
+  }
+
+  // Override the getAgent method with correct typing
+  public override getAgent(agentId: string): ExtendedAgentRuntime | undefined {
+    const agent = super.getAgent(agentId);
+    return agent as ExtendedAgentRuntime | undefined;
+  }
+}
+
 const startAgents = async () => {
-  const directClient = new DirectClient();
+  const directClient = new ExtendedDirectClient(); // Use extended client instead
   let serverPort = parseInt(settings.SERVER_PORT || "3000");
   const args = parseArguments();
 
@@ -140,8 +233,12 @@ const startAgents = async () => {
   }
   console.log("characters", characters);
   try {
-    for (const character of characters) {
-      await startAgent(character, directClient as DirectClient);
+    for (const char of characters) {
+      const extendedChar: Character = {
+        ...char,
+        settings: char.settings || {},
+      };
+      await startAgent(extendedChar, directClient as ExtendedDirectClient);
     }
   } catch (error) {
     elizaLogger.error("Error starting agents:", error);
