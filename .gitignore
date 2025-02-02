@@ -8,3 +8,5 @@ dist/
 
 db.sqlite
 .idea
+
+copilot-instructions.md

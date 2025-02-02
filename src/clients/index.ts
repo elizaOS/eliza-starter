@@ -5,7 +5,7 @@ import { DiscordClientInterface } from "@elizaos/client-discord";
 import { TelegramClientInterface } from "@elizaos/client-telegram";
 import { TwitterClientInterface } from "@elizaos/client-twitter";
 import { IAgentRuntime } from "@elizaos/core";
-import { Character } from "../types.ts";
+import { Character } from "../types/index.ts";
 import { createPVPVAIClient } from "./PVPVAIIntegration.ts";
 import { AgentRuntime } from "@elizaos/core";
 

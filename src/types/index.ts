@@ -8,6 +8,13 @@ interface PVPVAISettings {
   endpoint: string;
   type: 'GM' | 'AGENT';
   gameMasterId?: string;
+  agentId?: string;
+
+}
+
+export interface AgentRole {
+  type: 'GM' | 'AGENT';
+  name?: string;
 }
 
 export interface Character extends BaseCharacter {
@@ -15,6 +22,7 @@ export interface Character extends BaseCharacter {
     pvpvai?: PVPVAISettings;
   };
   modelProvider: ModelProviderName;
+  agentRole?: AgentRole;
 }
 
 // Make clients required since it's required in IAgentRuntime

@@ -29,6 +29,7 @@ import {
   type AgentConfig, 
   type GameMasterConfig 
 } from './clients/PVPVAIIntegration.ts';
+import { DebateOrchestrator } from './DebateOrchestrator.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -166,6 +167,12 @@ declare module '@elizaos/client-direct' {
 }
 
 class ExtendedDirectClient extends BaseDirectClient {
+  private _agents: Map<string, ExtendedAgentRuntime> = new Map();
+
+  public getActiveRuntimes(): ExtendedAgentRuntime[] {
+    return Array.from(this._agents.values());
+  }
+
   constructor() {
     super();
     
@@ -266,6 +273,11 @@ class ExtendedDirectClient extends BaseDirectClient {
     const agent = super.getAgent(agentId);
     return agent as ExtendedAgentRuntime | undefined;
   }
+
+  public override registerAgent(runtime: ExtendedAgentRuntime): void {
+    super.registerAgent(runtime);
+    this._agents.set(runtime.agentId, runtime);
+  }
 }
 
 const startAgents = async () => {
@@ -314,8 +326,34 @@ const startAgents = async () => {
   const isDaemonProcess = process.env.DAEMON_PROCESS === "true";
   if(!isDaemonProcess) {
     elizaLogger.log("Chat started. Type 'exit' to quit.");
-    const chat = startChat(characters);
-    chat();
+    
+    // Get and log active runtimes for debugging
+    const activeRuntimes = directClient.getActiveRuntimes();
+    console.log('Active runtimes:', activeRuntimes.map(r => ({
+      name: r.character.name,
+      type: (r.character as any).agentRole?.type,
+      id: r.agentId
+    })));
+    
+    const orchestrator = new DebateOrchestrator(activeRuntimes);
+    
+    // Increased wait time for WebSocket connections
+    elizaLogger.log("Waiting for WebSocket connections to establish...");
+    await new Promise(resolve => setTimeout(resolve, 8000));
+    
+    try {
+      elizaLogger.log("Starting debate...");
+      await orchestrator.startDebate();
+    } catch (error) {
+      elizaLogger.error('Error starting debate:', error);
+    }
+
+    // Graceful shutdown handler with logging
+    process.on('SIGINT', () => {
+      elizaLogger.log("Stopping debate...");
+      orchestrator.stopDebate();
+      process.exit(0);
+    });
   }
 };
 
