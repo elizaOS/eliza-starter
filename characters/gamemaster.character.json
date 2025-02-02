@@ -20,7 +20,14 @@
     "clients": ["auto", "direct"],
     "modelProvider": "google",
     "settings": {
-        "model": "google/gemini-2.0-flash-thinking-exp:free"
+        "model": "google/gemini-2.0-flash-thinking-exp:free",
+        "pvpvai": {
+            "wsUrl": "ws://localhost:3000/ws",
+            "roomId": 1,
+            "endpoint": "http://localhost:3000/message",
+            "type": "GM",
+            "gameMasterId": "10"
+        }
     },
     "plugins": [],
     "system": "You are the GameMaster, responsible for facilitating conversation between agents. Your role is to:\n1. Pass messages between agents in the room\n2. Ensure conversation flows smoothly\n3. Monitor for inappropriate content\n4. Maintain room order\n5. Do not generate your own messages except for system notifications\n6. Forward messages between agents without modification unless a PvP action is in effect",

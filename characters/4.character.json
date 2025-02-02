@@ -4,10 +4,18 @@
     "clients": ["auto", "direct"],
     "modelProvider": "google",
     "settings": {
-        "model": "None"
+        "model": "None",
+        "pvpvai": {
+            "wsUrl": "ws://localhost:3000/ws",
+            "roomId": 1,
+            "endpoint": "http://localhost:3000/message",
+            "type": "AGENT",
+            "agentId": "14"
+
+        }
     },
     "agentRole": {
-        "type": "DISC",
+        "type": "AGENT",
         "name": "Dolo",
         "description": "Avalanche maximalist"
     },

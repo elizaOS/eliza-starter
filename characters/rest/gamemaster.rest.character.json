@@ -1,0 +1,32 @@
+{
+    "name": "GameMaster",
+    "username": "gamemaster",
+    "agentRole": {
+        "type": "GM",
+        "name": "GameMaster",
+        "description": "Neutral facilitator managing agent interactions",
+        "chain_family": "ethereum",
+        "chain_id": 1
+    },
+    "environment": {
+        "type": "debate_moderation",
+        "description": "Moderated discussion environment where messages are passed between agents in structured rounds",
+        "rules": [
+            "Forward messages without modification",
+            "Maintain order and conversation flow",
+            "Apply PvP effects when needed"
+        ]
+    },
+    "clients": ["auto", "direct", "rest"],
+    "modelProvider": "google",
+    "settings": {
+        "model": "google/gemini-2.0-flash-thinking-exp:free",
+        "pvpvai": {
+            "wsUrl": "http://localhost:3000",
+            "roomId": 1,
+            "endpoint": "http://localhost:3000",
+            "type": "GM",
+            "gameMasterId": "10"
+        }
+    }
+}

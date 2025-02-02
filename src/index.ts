@@ -5,7 +5,7 @@ import {
   stringToUuid,
   AgentRuntime as CoreAgentRuntime
 } from "@elizaos/core";
-import { type Character, type ExtendedAgentRuntime, AgentRuntime } from "./types";
+import { type Character, type ExtendedAgentRuntime, AgentRuntime } from "./types/index.ts";
 import { bootstrapPlugin } from "@elizaos/plugin-bootstrap";
 import { createNodePlugin } from "@elizaos/plugin-node";
 import { solanaPlugin } from "@elizaos/plugin-solana";
@@ -18,12 +18,17 @@ import { character } from "./character.ts";
 import { startChat } from "./chat/index.ts";
 import { initializeClients } from "./clients/index.ts";
 import {
-  getTokenForProvider,
+  getTokenForProvider,  
   loadCharacters,
   parseArguments,
 } from "./config/index.ts";
 import { initializeDatabase } from "./database/index.ts";
-import { PVPVAIAgent, PVPVAIGameMaster } from './clients/PVPVAIIntegration';
+import { 
+  PVPVAIIntegration, 
+  createPVPVAIClient, 
+  type AgentConfig, 
+  type GameMasterConfig 
+} from './clients/PVPVAIIntegration.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -92,17 +97,31 @@ async function startAgent(character: Character, directClient: ExtendedDirectClie
 
     runtime.clients = await initializeClients(character, runtime);
 
-    // Initialize PVP/VAI integration if configured
-    if (character.settings?.pvpvai) {
-      const config = {
+
+if (character.settings?.pvpvai) {
+  const isGM = character.settings.pvpvai.type === 'GM';
+  
+  const config = isGM 
+    ? {
+        wsUrl: character.settings.pvpvai.wsUrl,
+        roomId: character.settings.pvpvai.roomId,
+        endpoint: character.settings.pvpvai.endpoint,
+        gameMasterId: character.settings.pvpvai.gameMasterId!
+      } 
+    : {
         wsUrl: character.settings.pvpvai.wsUrl,
         roomId: character.settings.pvpvai.roomId,
         endpoint: character.settings.pvpvai.endpoint,
         agentId: parseInt(runtime.agentId)
       };
-      
-      runtime.pvpvaiAgent = new PVPVAIAgent(config);
-    }
+
+  const pvpvaiClient = createPVPVAIClient(runtime, config);
+  
+  if (!runtime.clients) {
+    runtime.clients = {};
+  }
+  runtime.clients['pvpvai'] = pvpvaiClient;
+}
 
     directClient.registerAgent(runtime);
 
@@ -150,18 +169,35 @@ class ExtendedDirectClient extends BaseDirectClient {
   constructor() {
     super();
     
-    // Add PVP/VAI endpoints
     this.app.post("/:agentId/pvp/action", async (req, res) => {
       const agentId = req.params.agentId;
       const runtime = this.getAgent(agentId) as ExtendedAgentRuntime;
       
-      if (!runtime?.pvpvaiAgent) {
+      if (!runtime?.pvpvaiClient) {
         res.status(404).send("Agent not found or PVP/VAI not configured");
         return;
       }
-
+    
       try {
-        await runtime.pvpvaiAgent.handleMessage(req.body);
+        const client = runtime.pvpvaiClient.getClient();
+        
+        // Type guard for AgentClient
+        if ('sendAIMessage' in client) {
+          await client.sendAIMessage({
+            text: req.body.content.text
+          });
+        } 
+        // Type guard for GameMasterClient
+        else if ('broadcastToRoom' in client) {
+          await client.broadcastToRoom({
+            gm_id: runtime.agentId,
+            content: {
+              text: req.body.content.text
+            },
+            targets: req.body.targets || [], // Use provided targets or empty array
+            timestamp: Date.now()
+          });
+        }
         res.json({ success: true });
       } catch (error) {
         res.status(500).json({
@@ -175,13 +211,13 @@ class ExtendedDirectClient extends BaseDirectClient {
       const agentId = req.params.agentId;
       const runtime = this.getAgent(agentId) as ExtendedAgentRuntime;
       
-      if (!runtime || !runtime.pvpvaiAgent) {
+      if (!runtime?.pvpvaiClient) {
         res.status(404).send("Agent not found or PVP/VAI not configured");
         return;
       }
 
       try {
-        runtime.pvpvaiAgent.updatePvPStatus(req.body);
+        // Status updates are handled internally by the integration
         res.json({ success: true });
       } catch (error) {
         res.status(500).json({
@@ -195,13 +231,26 @@ class ExtendedDirectClient extends BaseDirectClient {
       const agentId = req.params.agentId;
       const runtime = this.getAgent(agentId) as ExtendedAgentRuntime;
       
-      if (!runtime || !runtime.gameMaster) {
+      if (!runtime?.pvpvaiClient) {
         res.status(404).send("Agent not found or GameMaster not configured");
         return;
       }
-
+    
       try {
-        await runtime.gameMaster.handleMessage(req.body);
+        const client = runtime.pvpvaiClient.getClient();
+        
+        if ('broadcastToRoom' in client) {
+          await client.broadcastToRoom({
+            gm_id: runtime.agentId,
+            content: {
+              text: req.body.content.text
+            },
+            targets: req.body.targets || [], // Use provided targets or empty array
+            timestamp: Date.now()
+          });
+        } else {
+          throw new Error('Not a GameMaster client');
+        }
         res.json({ success: true });
       } catch (error) {
         res.status(500).json({
@@ -220,7 +269,7 @@ class ExtendedDirectClient extends BaseDirectClient {
 }
 
 const startAgents = async () => {
-  const directClient = new ExtendedDirectClient(); // Use extended client instead
+  const directClient = new ExtendedDirectClient();
   let serverPort = parseInt(settings.SERVER_PORT || "3000");
   const args = parseArguments();
 
@@ -232,6 +281,7 @@ const startAgents = async () => {
     characters = await loadCharacters(charactersArg);
   }
   console.log("characters", characters);
+  
   try {
     for (const char of characters) {
       const extendedChar: Character = {

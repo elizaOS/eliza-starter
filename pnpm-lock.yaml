@@ -80,6 +80,9 @@ importers:
       url:
         specifier: 0.11.4
         version: 0.11.4
+      uuid:
+        specifier: ^9.0.1
+        version: 9.0.1
       ws:
         specifier: 8.18.0
         version: 8.18.0(bufferutil@4.0.9)(utf-8-validate@5.0.10)
@@ -11521,7 +11524,7 @@ snapshots:
 
   extract-zip@2.0.1:
     dependencies:
-      debug: 4.3.4
+      debug: 4.4.0
       get-stream: 5.2.0
       yauzl: 2.10.0
     optionalDependencies:
