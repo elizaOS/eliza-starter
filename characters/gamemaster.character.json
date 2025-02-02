@@ -22,11 +22,11 @@
     "settings": {
         "model": "google/gemini-2.0-flash-thinking-exp:free",
         "pvpvai": {
-            "wsUrl": "ws://localhost:3000/ws",
+            "wsUrl": "ws://localhost:3000",
             "roomId": 1,
             "endpoint": "http://localhost:3000/message",
             "type": "GM",
-            "gameMasterId": "10"
+            "gameMasterId": "3"
         }
     },
     "plugins": [],
