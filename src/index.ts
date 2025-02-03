@@ -3,9 +3,9 @@ import {
   elizaLogger,
   settings,
   stringToUuid,
-  AgentRuntime as CoreAgentRuntime
+  AgentRuntime as CoreAgentRuntime,
+  AgentRuntime
 } from "@elizaos/core";
-import { type Character, type ExtendedAgentRuntime, AgentRuntime } from "./types/index.ts";
 import { bootstrapPlugin } from "@elizaos/plugin-bootstrap";
 import { createNodePlugin } from "@elizaos/plugin-node";
 import { solanaPlugin } from "@elizaos/plugin-solana";
@@ -26,17 +26,16 @@ import { initializeDatabase } from "./database/index.ts";
 import { 
   PVPVAIIntegration, 
   createPVPVAIClient, 
-  type AgentConfig, 
-  type GameMasterConfig 
 } from './clients/PVPVAIIntegration.ts';
+import { AgentConfig, GameMasterConfig, MessageContent } from "./clients/types.ts";
 import { DebateOrchestrator } from './DebateOrchestrator.ts';
+import type { Character as ExtendedCharacter, ExtendedAgentRuntime, Character } from "./types/index.ts"; // Added import for ExtendedCharacter
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export const wait = (minTime: number = 1000, maxTime: number = 3000) => {
-  const waitTime =
-    Math.floor(Math.random() * (maxTime - minTime + 1)) + minTime;
+  const waitTime = Math.floor(Math.random() * (maxTime - minTime + 1)) + minTime;
   return new Promise((resolve) => setTimeout(resolve, waitTime));
 };
 
@@ -47,25 +46,29 @@ export function createAgent(
   db: any,
   cache: any,
   token: string
-) {
+): ExtendedAgentRuntime {
+  // Cast to ExtendedCharacter to ensure required properties are available
+  const extendedChar = character as unknown as ExtendedCharacter;
+  const extendedAgentRole = extendedChar.agentRole; // Now agentRole is required
+  
   elizaLogger.success(
     elizaLogger.successesTitle,
     "Creating runtime for character",
-    character.name,
+    extendedChar.name // Using extendedChar.name
   );
 
   nodePlugin ??= createNodePlugin();
-
-  return new AgentRuntime({
+  
+  const runtime = new AgentRuntime({
     databaseAdapter: db,
     token,
-    modelProvider: character.modelProvider,
+    modelProvider: extendedChar.modelProvider,
     evaluators: [],
-    character,
+    character: extendedChar,
     plugins: [
       bootstrapPlugin,
       nodePlugin,
-      character.settings?.secrets?.WALLET_PUBLIC_KEY ? solanaPlugin : null,
+      extendedChar.settings?.secrets?.WALLET_PUBLIC_KEY ? solanaPlugin : null,
     ].filter(Boolean),
     providers: [],
     actions: [],
@@ -73,14 +76,25 @@ export function createAgent(
     managers: [],
     cacheManager: cache,
   }) as ExtendedAgentRuntime;
+  
+  // Access settings.pvpvai via direct type without extra cast since it's optional
+  const pvpSettings = extendedChar.settings?.pvpvai;
+  if (pvpSettings) {
+    runtime.roomId = pvpSettings.roomId;
+    runtime.userId = Number(pvpSettings.userId);
+  }
+  
+  return runtime;
 }
 
 async function startAgent(character: Character, directClient: ExtendedDirectClient) {
   try {
-    character.id ??= stringToUuid(character.name);
-    character.username ??= character.name;
+    // Ensure character has extended properties
+    const extendedChar = character as unknown as ExtendedCharacter;
+    extendedChar.id ??= stringToUuid(extendedChar.name);
+    extendedChar.username ??= extendedChar.name;
 
-    const token = getTokenForProvider(character.modelProvider, character);
+    const token = getTokenForProvider(extendedChar.modelProvider, extendedChar);
     const dataDir = path.join(__dirname, "../data");
 
     if (!fs.existsSync(dataDir)) {
@@ -88,51 +102,47 @@ async function startAgent(character: Character, directClient: ExtendedDirectClie
     }
 
     const db = initializeDatabase(dataDir);
-
     await db.init();
 
-    const cache = initializeDbCache(character, db);
-    const runtime = createAgent(character, db, cache, token);
+    const cache = initializeDbCache(extendedChar, db);
+    const runtime = createAgent(extendedChar, db, cache, token);
 
     await runtime.initialize();
+    runtime.clients = await initializeClients(extendedChar, runtime);
 
-    runtime.clients = await initializeClients(character, runtime);
+    if (extendedChar.settings?.pvpvai) {
+      const isGM = extendedChar.agentRole?.type === 'GM';
+      
+      try {
+        const config: GameMasterConfig | AgentConfig = isGM ? {
+          endpoint: extendedChar.settings.pvpvai.endpoint,
+          roomId: extendedChar.settings.pvpvai.roomId,
+          type: 'GM',
+          gameMasterId: extendedChar.settings.pvpvai.gameMasterId || '',
+          userId: extendedChar.settings.pvpvai.userId
+        } : {
+          endpoint: extendedChar.settings.pvpvai.endpoint,
+          roomId: extendedChar.settings.pvpvai.roomId,
+          type: 'AGENT',
+          agentId: extendedChar.settings.pvpvai.agentId || '',
+          userId: extendedChar.settings.pvpvai.userId
+        };
 
-
-if (character.settings?.pvpvai) {
-  const isGM = character.settings.pvpvai.type === 'GM';
-  
-  const config = isGM 
-    ? {
-        wsUrl: character.settings.pvpvai.wsUrl,
-        roomId: character.settings.pvpvai.roomId,
-        endpoint: character.settings.pvpvai.endpoint,
-        gameMasterId: character.settings.pvpvai.gameMasterId!
-      } 
-    : {
-        wsUrl: character.settings.pvpvai.wsUrl,
-        roomId: character.settings.pvpvai.roomId,
-        endpoint: character.settings.pvpvai.endpoint,
-        agentId: parseInt(runtime.agentId)
-      };
-
-  const pvpvaiClient = createPVPVAIClient(runtime, config);
-  
-  if (!runtime.clients) {
-    runtime.clients = {};
-  }
-  runtime.clients['pvpvai'] = pvpvaiClient;
-}
+        const pvpvaiClient = createPVPVAIClient(runtime, config);
+        runtime.clients = runtime.clients || {};
+        runtime.clients['pvpvai'] = pvpvaiClient;
+      } catch (error) {
+        console.error('Failed to initialize PvPvAI client:', error);
+      }
+    }
 
     directClient.registerAgent(runtime);
-
-    // report to console
-    elizaLogger.debug(`Started ${character.name} as ${runtime.agentId}`);
+    elizaLogger.debug(`Started ${extendedChar.name} as ${runtime.agentId}`);
 
     return runtime;
   } catch (error) {
     elizaLogger.error(
-      `Error starting agent for character ${character.name}:`,
+      `Error starting agent for character ${(character as unknown as ExtendedCharacter).name}:`,
       error,
     );
     console.error(error);
@@ -159,7 +169,6 @@ const checkPortAvailable = (port: number): Promise<boolean> => {
   });
 };
 
-// Update the declaration without protected modifier
 declare module '@elizaos/client-direct' {
   interface DirectClient {
     getAgent(agentId: string): CoreAgentRuntime;
@@ -190,20 +199,20 @@ class ExtendedDirectClient extends BaseDirectClient {
         
         // Type guard for AgentClient
         if ('sendAIMessage' in client) {
-          await client.sendAIMessage({
+          const message: MessageContent = {
             text: req.body.content.text
-          });
+          };
+          await client.sendAIMessage(message);
         } 
         // Type guard for GameMasterClient
         else if ('broadcastToRoom' in client) {
-          await client.broadcastToRoom({
+          const message: MessageContent = {
+            text: req.body.content.text,
             gm_id: runtime.agentId,
-            content: {
-              text: req.body.content.text
-            },
-            targets: req.body.targets || [], // Use provided targets or empty array
+            targets: req.body.targets || [],
             timestamp: Date.now()
-          });
+          };
+          await client.broadcastToRoom(message);
         }
         res.json({ success: true });
       } catch (error) {
@@ -247,14 +256,13 @@ class ExtendedDirectClient extends BaseDirectClient {
         const client = runtime.pvpvaiClient.getClient();
         
         if ('broadcastToRoom' in client) {
-          await client.broadcastToRoom({
+          const message: MessageContent = {
+            text: req.body.content.text,
             gm_id: runtime.agentId,
-            content: {
-              text: req.body.content.text
-            },
-            targets: req.body.targets || [], // Use provided targets or empty array
+            targets: req.body.targets || [],
             timestamp: Date.now()
-          });
+          };
+          await client.broadcastToRoom(message);
         } else {
           throw new Error('Not a GameMaster client');
         }
@@ -268,7 +276,6 @@ class ExtendedDirectClient extends BaseDirectClient {
     });
   }
 
-  // Override the getAgent method with correct typing
   public override getAgent(agentId: string): ExtendedAgentRuntime | undefined {
     const agent = super.getAgent(agentId);
     return agent as ExtendedAgentRuntime | undefined;
@@ -296,11 +303,18 @@ const startAgents = async () => {
   
   try {
     for (const char of characters) {
-      const extendedChar: Character = {
-        ...char,
-        settings: char.settings || {},
+      // Cast to ExtendedCharacter to access agentRole
+      const extendedChar = char as unknown as ExtendedCharacter;
+      if (!extendedChar.agentRole) {
+        throw new Error(`Character ${extendedChar.name} missing required agentRole configuration`);
+      }
+      
+      const extendedCharacter: Character = {
+        ...extendedChar,
+        settings: extendedChar.settings || {},
+        agentRole: extendedChar.agentRole
       };
-      await startAgent(extendedChar, directClient as ExtendedDirectClient);
+      await startAgent(extendedCharacter, directClient);
     }
   } catch (error) {
     elizaLogger.error("Error starting agents:", error);
@@ -311,12 +325,7 @@ const startAgents = async () => {
     serverPort++;
   }
 
-  // upload some agent functionality into directClient
-  directClient.startAgent = async (character: Character) => {
-    // wrap it so we don't have to inject directClient later
-    return startAgent(character, directClient);
-  };
-
+  directClient.startAgent = startAgent;
   directClient.start(serverPort);
 
   if (serverPort !== parseInt(settings.SERVER_PORT || "3000")) {
@@ -327,18 +336,16 @@ const startAgents = async () => {
   if(!isDaemonProcess) {
     elizaLogger.log("Chat started. Type 'exit' to quit.");
     
-    // Get and log active runtimes for debugging
     const activeRuntimes = directClient.getActiveRuntimes();
     console.log('Active runtimes:', activeRuntimes.map(r => ({
       name: r.character.name,
-      type: (r.character as any).agentRole?.type,
+      type: r.character.agentRole?.type,
       id: r.agentId
     })));
     
     const orchestrator = new DebateOrchestrator(activeRuntimes);
     
-    // Increased wait time for WebSocket connections
-    elizaLogger.log("Waiting for WebSocket connections to establish...");
+    elizaLogger.log("Waiting for connections to establish...");
     await new Promise(resolve => setTimeout(resolve, 8000));
     
     try {
@@ -348,7 +355,6 @@ const startAgents = async () => {
       elizaLogger.error('Error starting debate:', error);
     }
 
-    // Graceful shutdown handler with logging
     process.on('SIGINT', () => {
       elizaLogger.log("Stopping debate...");
       orchestrator.stopDebate();

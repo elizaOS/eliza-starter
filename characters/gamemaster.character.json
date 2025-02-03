@@ -26,7 +26,8 @@
             "roomId": 1,
             "endpoint": "http://localhost:3000/message",
             "type": "GM",
-            "gameMasterId": 3
+            "gameMasterId": 3,
+            "userId": 11
         }
     },
     "plugins": [],

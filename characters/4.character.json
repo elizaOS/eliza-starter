@@ -10,7 +10,8 @@
             "roomId": 1,
             "endpoint": "http://localhost:3000/message",
             "type": "AGENT",
-            "agentId": 14
+            "agentId": 50,
+            "userId": 11
 
         }
     },

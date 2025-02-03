@@ -1,5 +1,3 @@
-// src/clients/index.ts
-
 import { AutoClientInterface } from "@elizaos/client-auto";
 import { DiscordClientInterface } from "@elizaos/client-discord";
 import { TelegramClientInterface } from "@elizaos/client-telegram";
@@ -8,6 +6,8 @@ import { IAgentRuntime } from "@elizaos/core";
 import { Character } from "../types/index.ts";
 import { createPVPVAIClient } from "./PVPVAIIntegration.ts";
 import { AgentRuntime } from "@elizaos/core";
+// Changed import to include .ts extension to resolve module loading issues
+import { AgentConfig, GameMasterConfig } from "./types.ts";
 
 export async function initializeClients(
   character: Character,
@@ -37,32 +37,27 @@ export async function initializeClients(
 
   // Initialize PvPvAI client if configured
   if (character.settings?.pvpvai) {
-    const config = character.settings.pvpvai;
     const isGM = character.agentRole?.type === "GM";
     
     try {
-      if (isGM && config.gameMasterId) {
-        const gmConfig = {
-          wsUrl: config.wsUrl,
-          roomId: config.roomId,
-          endpoint: config.endpoint,
-          gameMasterId: config.gameMasterId
+      if (isGM && character.settings.pvpvai.gameMasterId) {
+        const gmConfig: GameMasterConfig = {
+          endpoint: character.settings.pvpvai.endpoint,
+          roomId: character.settings.pvpvai.roomId,
+          userId: character.settings.pvpvai.userId,
+          type: 'GM',
+          gameMasterId: character.settings.pvpvai.gameMasterId
         };
         const pvpvaiClient = createPVPVAIClient(runtime as AgentRuntime, gmConfig);
         clients.push(pvpvaiClient);
-      } else if (config.agentId) {
-        const agentConfig = {
-          wsUrl: config.wsUrl,
-          roomId: config.roomId,
-          endpoint: config.endpoint,
-          agentId: parseInt(config.agentId.toString(), 10) // Ensure agentId is a number
+      } else if (character.settings.pvpvai.agentId) {
+        const agentConfig: AgentConfig = {
+          endpoint: character.settings.pvpvai.endpoint,
+          roomId: character.settings.pvpvai.roomId,
+          userId: character.settings.pvpvai.userId,
+          type: 'AGENT',
+          agentId: character.settings.pvpvai.agentId
         };
-
-        // Validate that we have a valid number
-        if (isNaN(agentConfig.agentId)) {
-          throw new Error('Invalid agentId: must be a valid number');
-        }
-
         const pvpvaiClient = createPVPVAIClient(runtime as AgentRuntime, agentConfig);
         clients.push(pvpvaiClient);
       }
@@ -83,3 +78,8 @@ export async function initializeClients(
 
   return clients;
 }
+
+export * from './types.ts';
+export * from './AgentClient.ts';
+export * from './GameMasterClient.ts';
+export * from './PVPVAIIntegration.ts';
