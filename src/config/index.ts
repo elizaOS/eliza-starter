@@ -99,5 +99,7 @@ export function getTokenForProvider(
       );
     case ModelProviderName.GROQ:
       return character.settings?.secrets?.GROQ_API_KEY || settings.GROQ_API_KEY;
+    case ModelProviderName.DEEPSEEK:
+      return character.settings?.secrets?.DEEPSEEK_API_KEY || settings.DEEPSEEK_API_KEY;
   }
 }
