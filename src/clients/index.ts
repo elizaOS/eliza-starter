@@ -47,7 +47,7 @@ export async function initializeClients(
           creatorId: character.settings.pvpvai.creatorId,
           type: 'GM',
           gameMasterId: character.settings.pvpvai.gameMasterId,
-          walletAddress: character.settings.pvpvai.walletAddress
+          walletAddress: character.settings.pvpvai.eth_wallet_address
         };
         const pvpvaiClient = createPVPVAIClient(runtime as AgentRuntime, gmConfig);
         clients.push(pvpvaiClient);
@@ -58,7 +58,7 @@ export async function initializeClients(
           creatorId: character.settings.pvpvai.creatorId,
           type: 'AGENT',
           agentId: character.settings.pvpvai.agentId,
-          walletAddress: character.settings.pvpvai.walletAddress
+          walletAddress: character.settings.pvpvai.eth_wallet_address
         };
         const pvpvaiClient = createPVPVAIClient(runtime as AgentRuntime, agentConfig);
         clients.push(pvpvaiClient);

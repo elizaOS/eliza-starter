@@ -116,14 +116,14 @@ async function startAgent(character: Character, directClient: ExtendedDirectClie
           roomId: extendedChar.settings.pvpvai.roomId,
           type: 'GM',
           gameMasterId: Number(extendedChar.settings.pvpvai.gameMasterId), // nr
-          walletAddress: extendedChar.settings.pvpvai.walletAddress, //  wallet address === id
+          walletAddress: extendedChar.settings.pvpvai.eth_wallet_address, //  wallet address === id
           creatorId: Number(extendedChar.settings.pvpvai.creatorId) // nr
         } : {
           endpoint: extendedChar.settings.pvpvai.endpoint,
           roomId: extendedChar.settings.pvpvai.roomId,
           type: 'AGENT',
           agentId: Number(extendedChar.settings.pvpvai.agentId), // nr
-          walletAddress: extendedChar.settings.pvpvai.walletAddress, // wallet address === id
+          walletAddress: extendedChar.settings.pvpvai.eth_wallet_address, // wallet address === id
           creatorId: Number(extendedChar.settings.pvpvai.creatorId) // nr
         };
 

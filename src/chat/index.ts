@@ -27,7 +27,7 @@ async function handleUserInput(input, agentId) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           text: input,
-          creatorId: "user",
+          userId: "user",
           userName: "User",
         }),
       }

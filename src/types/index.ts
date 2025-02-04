@@ -10,27 +10,6 @@ export interface AgentRole {
   chain_id?: number;
 }
 
-export interface RoomSetup {
-  name: string;
-  room_type: string;
-  token: string; 
-  token_webhook: string;
-  agents: Record<string, {
-    wallet: string;
-    webhook: string;
-  }>;
-  gm: string; // This should be wallet address
-  chain_id: string;
-  chain_family: string;
-  room_config: {
-    round_duration: number;
-    pvp_config: {
-      enabled: boolean;
-      enabled_rules: string[];
-    };
-  };
-  transaction_hash: string;
-}
 
 export interface PVPVAISettings {
   wsUrl: string;
@@ -42,7 +21,7 @@ export interface PVPVAISettings {
   gameMasterId?: number;
   // For Agent
   agentId?: number;
-  walletAddress?: string; // === eth_wallet_address
+  eth_wallet_address?: string; // === eth_wallet_address
   solanaWalletAddress?: string; // solana_wallet_address
   creatorId: number; // Changed from string to number to match DB schema
 }
