@@ -24,10 +24,13 @@
         "pvpvai": {
             "wsUrl": "ws://localhost:3000",
             "roomId": 1,
-            "endpoint": "http://localhost:3000/message",
+            "roundId": 1, 
+            "endpoint": "http://localhost:3000",
             "type": "GM",
-            "gameMasterId": 3,
-            "userId": 11
+            "gameMasterId": 51,
+            "eth_wallet_address": "0xc39357B73876B940A69bc5c58b318d64F98830d6",
+            "solana_wallet_address": "Solana000000000000000000000000000473c47f7b9447",
+            "creatorId": 1
         }
     },
     "plugins": [],

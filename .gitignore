@@ -10,3 +10,6 @@ db.sqlite
 .idea
 
 copilot-instructions.md
+
+.DS_Store
+backend.txt

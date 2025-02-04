@@ -44,9 +44,10 @@ export async function initializeClients(
         const gmConfig: GameMasterConfig = {
           endpoint: character.settings.pvpvai.endpoint,
           roomId: character.settings.pvpvai.roomId,
-          userId: character.settings.pvpvai.userId,
+          creatorId: character.settings.pvpvai.creatorId,
           type: 'GM',
-          gameMasterId: character.settings.pvpvai.gameMasterId
+          gameMasterId: character.settings.pvpvai.gameMasterId,
+          walletAddress: character.settings.pvpvai.walletAddress
         };
         const pvpvaiClient = createPVPVAIClient(runtime as AgentRuntime, gmConfig);
         clients.push(pvpvaiClient);
@@ -54,9 +55,10 @@ export async function initializeClients(
         const agentConfig: AgentConfig = {
           endpoint: character.settings.pvpvai.endpoint,
           roomId: character.settings.pvpvai.roomId,
-          userId: character.settings.pvpvai.userId,
+          creatorId: character.settings.pvpvai.creatorId,
           type: 'AGENT',
-          agentId: character.settings.pvpvai.agentId
+          agentId: character.settings.pvpvai.agentId,
+          walletAddress: character.settings.pvpvai.walletAddress
         };
         const pvpvaiClient = createPVPVAIClient(runtime as AgentRuntime, agentConfig);
         clients.push(pvpvaiClient);

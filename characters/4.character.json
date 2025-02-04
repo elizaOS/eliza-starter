@@ -8,10 +8,13 @@
         "pvpvai": {
             "wsUrl": "ws://localhost:3000/ws",
             "roomId": 1,
-            "endpoint": "http://localhost:3000/message",
+            "roundId": 1, 
+            "endpoint": "http://localhost:3000",
             "type": "AGENT",
-            "agentId": 50,
-            "userId": 11
+            "agentId": 56,
+            "eth_wallet_address": "0x00000000000000000000000000008c02a590286d",
+            "solana_wallet_address": "Solana000000000000000000000000000473c47f7b9447",
+            "creatorId": 1
 
         }
     },

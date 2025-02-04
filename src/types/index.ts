@@ -10,14 +10,41 @@ export interface AgentRole {
   chain_id?: number;
 }
 
+export interface RoomSetup {
+  name: string;
+  room_type: string;
+  token: string; 
+  token_webhook: string;
+  agents: Record<string, {
+    wallet: string;
+    webhook: string;
+  }>;
+  gm: string; // This should be wallet address
+  chain_id: string;
+  chain_family: string;
+  room_config: {
+    round_duration: number;
+    pvp_config: {
+      enabled: boolean;
+      enabled_rules: string[];
+    };
+  };
+  transaction_hash: string;
+}
+
 export interface PVPVAISettings {
+  wsUrl: string;
   endpoint: string;
   roomId: number;
-  roundId?: number;
+  roundId: number;
   type: 'GM' | 'AGENT';
-  gameMasterId?: string;
-  agentId?: string;
-  userId: string;
+  // For GM
+  gameMasterId?: number;
+  // For Agent
+  agentId?: number;
+  walletAddress?: string; // === eth_wallet_address
+  solanaWalletAddress?: string; // solana_wallet_address
+  creatorId: number; // Changed from string to number to match DB schema
 }
 
 export interface Environment {
@@ -31,7 +58,7 @@ export interface ExtendedCharacterProps {
   agentRole: AgentRole;
   environment?: Environment;
   roomId?: number;
-  userId?: string;
+  creatorId?: string;
   settings?: {
     pvpvai?: PVPVAISettings;
     model?: string;
@@ -50,7 +77,7 @@ export type ExtendedAgentRuntime = BaseAgentRuntime & {
   clients: Record<string, any>;
   character: Character;
   roomId?: number;
-  userId?: number;
+  creatorId?: number;
 };
 export interface MessageContent {
   text: string;
@@ -76,7 +103,7 @@ export interface DebateMemory {
     action?: string;
   };
   roomId: UUID;
-  userId: UUID;
+  creatorId: UUID;
   agentId: UUID;
   timestamp: number;
 }

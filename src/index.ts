@@ -27,9 +27,9 @@ import {
   PVPVAIIntegration, 
   createPVPVAIClient, 
 } from './clients/PVPVAIIntegration.ts';
-import { AgentConfig, GameMasterConfig, MessageContent } from "./clients/types.ts";
+import { AgentConfig, BroadcastContent, GameMasterConfig } from "./clients/types.ts";
 import { DebateOrchestrator } from './DebateOrchestrator.ts';
-import type { Character as ExtendedCharacter, ExtendedAgentRuntime, Character } from "./types/index.ts"; // Added import for ExtendedCharacter
+import type { Character as ExtendedCharacter, ExtendedAgentRuntime, Character } from "./types/index.ts";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -47,14 +47,13 @@ export function createAgent(
   cache: any,
   token: string
 ): ExtendedAgentRuntime {
-  // Cast to ExtendedCharacter to ensure required properties are available
   const extendedChar = character as unknown as ExtendedCharacter;
-  const extendedAgentRole = extendedChar.agentRole; // Now agentRole is required
+  const extendedAgentRole = extendedChar.agentRole;
   
   elizaLogger.success(
     elizaLogger.successesTitle,
     "Creating runtime for character",
-    extendedChar.name // Using extendedChar.name
+    extendedChar.name
   );
 
   nodePlugin ??= createNodePlugin();
@@ -77,11 +76,10 @@ export function createAgent(
     cacheManager: cache,
   }) as ExtendedAgentRuntime;
   
-  // Access settings.pvpvai via direct type without extra cast since it's optional
   const pvpSettings = extendedChar.settings?.pvpvai;
   if (pvpSettings) {
     runtime.roomId = pvpSettings.roomId;
-    runtime.userId = Number(pvpSettings.userId);
+    runtime.creatorId = Number(pvpSettings.creatorId);
   }
   
   return runtime;
@@ -89,7 +87,6 @@ export function createAgent(
 
 async function startAgent(character: Character, directClient: ExtendedDirectClient) {
   try {
-    // Ensure character has extended properties
     const extendedChar = character as unknown as ExtendedCharacter;
     extendedChar.id ??= stringToUuid(extendedChar.name);
     extendedChar.username ??= extendedChar.name;
@@ -118,14 +115,16 @@ async function startAgent(character: Character, directClient: ExtendedDirectClie
           endpoint: extendedChar.settings.pvpvai.endpoint,
           roomId: extendedChar.settings.pvpvai.roomId,
           type: 'GM',
-          gameMasterId: extendedChar.settings.pvpvai.gameMasterId || '',
-          userId: extendedChar.settings.pvpvai.userId
+          gameMasterId: Number(extendedChar.settings.pvpvai.gameMasterId), // nr
+          walletAddress: extendedChar.settings.pvpvai.walletAddress, //  wallet address === id
+          creatorId: Number(extendedChar.settings.pvpvai.creatorId) // nr
         } : {
           endpoint: extendedChar.settings.pvpvai.endpoint,
           roomId: extendedChar.settings.pvpvai.roomId,
           type: 'AGENT',
-          agentId: extendedChar.settings.pvpvai.agentId || '',
-          userId: extendedChar.settings.pvpvai.userId
+          agentId: Number(extendedChar.settings.pvpvai.agentId), // nr
+          walletAddress: extendedChar.settings.pvpvai.walletAddress, // wallet address === id
+          creatorId: Number(extendedChar.settings.pvpvai.creatorId) // nr
         };
 
         const pvpvaiClient = createPVPVAIClient(runtime, config);
@@ -197,22 +196,14 @@ class ExtendedDirectClient extends BaseDirectClient {
       try {
         const client = runtime.pvpvaiClient.getClient();
         
-        // Type guard for AgentClient
         if ('sendAIMessage' in client) {
-          const message: MessageContent = {
-            text: req.body.content.text
-          };
-          await client.sendAIMessage(message);
+          await client.sendAIMessage({ text: req.body.content.text });
         } 
-        // Type guard for GameMasterClient
         else if ('broadcastToRoom' in client) {
-          const message: MessageContent = {
+          await client.broadcastToRoom({
             text: req.body.content.text,
-            gm_id: runtime.agentId,
-            targets: req.body.targets || [],
-            timestamp: Date.now()
-          };
-          await client.broadcastToRoom(message);
+            roundId: req.body.roundId || runtime.character.settings?.pvpvai?.roundId || 1
+          } as BroadcastContent);  // Add type assertion here
         }
         res.json({ success: true });
       } catch (error) {
@@ -233,7 +224,6 @@ class ExtendedDirectClient extends BaseDirectClient {
       }
 
       try {
-        // Status updates are handled internally by the integration
         res.json({ success: true });
       } catch (error) {
         res.status(500).json({
@@ -256,13 +246,10 @@ class ExtendedDirectClient extends BaseDirectClient {
         const client = runtime.pvpvaiClient.getClient();
         
         if ('broadcastToRoom' in client) {
-          const message: MessageContent = {
+          await client.broadcastToRoom({
             text: req.body.content.text,
-            gm_id: runtime.agentId,
-            targets: req.body.targets || [],
-            timestamp: Date.now()
-          };
-          await client.broadcastToRoom(message);
+            roundId: req.body.roundId || runtime.character.settings?.pvpvai?.roundId || 1
+          });
         } else {
           throw new Error('Not a GameMaster client');
         }
@@ -303,7 +290,6 @@ const startAgents = async () => {
   
   try {
     for (const char of characters) {
-      // Cast to ExtendedCharacter to access agentRole
       const extendedChar = char as unknown as ExtendedCharacter;
       if (!extendedChar.agentRole) {
         throw new Error(`Character ${extendedChar.name} missing required agentRole configuration`);
