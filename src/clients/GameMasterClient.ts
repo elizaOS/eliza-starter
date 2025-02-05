@@ -306,7 +306,8 @@ export class GameMasterClient extends DirectClient {
 
     const timestamp = Date.now();
     const messageContent = {
-      gmId: this.gmId,
+      // Changed from string to number for type compatibility
+      gmId: this.gmNumericId, // Using numeric ID instead of wallet address
       timestamp,
       targets: content.targets || [],
       roomId: this.roomId,
@@ -315,7 +316,7 @@ export class GameMasterClient extends DirectClient {
       deadline: content.deadline,
       additionalData: {
         ...content.additionalData,
-        messageHistory: this.messageHistory // Include message history
+        messageHistory: this.messageHistory
       },
       ignoreErrors: content.ignoreErrors ?? false
     };
