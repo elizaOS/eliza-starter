@@ -2,14 +2,9 @@ import { z } from 'zod';
 import { AgentRuntime, generateText, stringToUuid, type UUID } from '@elizaos/core';
 import type { ExtendedAgentRuntime } from './types/index.ts';
 import { 
-  agentMessageInputSchema,
-  gmMessageInputSchema,
-  observationMessageInputSchema,
-  PvPEffect,
   PvpAllPvpActionsType
 } from './types/schemas.ts';
 import { PvpActions, PvpActionCategories } from './types/pvp.ts';
-import { WsMessageTypes } from './types/ws.ts';
 import axios from 'axios';
 
 
@@ -23,7 +18,6 @@ interface DebateState {
     text: string;
     timestamp: number;
   }>;
-  activePvPEffects: PvPEffect[];
 }
 
 class DebateOrchestrator {
@@ -38,8 +32,7 @@ class DebateOrchestrator {
   private state: DebateState = {
     phase: 'init',
     currentTurn: 0,
-    messageHistory: [],
-    activePvPEffects: []
+    messageHistory: []
   };
 
   // Configuration
@@ -65,46 +58,6 @@ class DebateOrchestrator {
       gameMaster: this.gameMaster?.character?.name,
       agents: this.agents.map(a => a.character?.name)
     });
-  }
-
-  // Simulate a random PvP action
-  private simulatePvPEffect(): {
-    type: PvpActions;
-    details?: { find: string; replace: string };
-  } | null {
-    if (Math.random() > this.PVP_CHANCE) return null;
-
-    const types = [PvpActions.SILENCE, PvpActions.DEAFEN, PvpActions.POISON];
-    const type = types[Math.floor(Math.random() * types.length)];
-    
-    if (type === PvpActions.POISON) {
-      return {
-        type,
-        details: {
-          find: 'blockchain',
-          replace: 'sparklechain'
-        }
-      };
-    }
-
-    return { type };
-  }
-
-  // Check if an agent is affected by a PvP effect
-  private isAffectedByPvP(agentId: number, actionType: PvpActions): boolean {
-    return this.state.activePvPEffects.some(effect => 
-      effect.targetId === agentId && 
-      effect.actionType === actionType && 
-      Date.now() < effect.expiresAt
-    );
-  }
-
-  // Clean up expired PvP effects
-  private cleanupPvPEffects() {
-    const now = Date.now();
-    this.state.activePvPEffects = this.state.activePvPEffects.filter(effect => 
-      now < effect.expiresAt
-    );
   }
 
   public async startDebate() {
@@ -225,30 +178,13 @@ class DebateOrchestrator {
     console.log(`Starting debate loop with ${this.agents.length} agents`);
     
     while (this.isDebating && this.state.phase === 'discussion') {
-      // Cleanup expired PvP effects
-      this.cleanupPvPEffects();
-
       // Process each agent's turn
       for (const agent of this.agents) {
         if (!this.isDebating) break;
 
         try {
-          // Check for PvP effects
-          const agentId = (agent.character as any).settings?.pvpvai?.agentId;
-          if (this.isAffectedByPvP(agentId, PvpActions.SILENCE)) { // Use enum instead of string
-            console.log(`Agent ${agent.character?.name} is silenced, skipping turn`);
-            continue;
-          }
-
           // Generate and send message
           await this.processAgentTurn(agent);
-
-          // Simulate random PvP action after turn
-          const pvpEffect = this.simulatePvPEffect();
-          if (pvpEffect) {
-            console.log('Simulated PvP effect:', pvpEffect);
-            this.state.activePvPEffects.push(pvpEffect);
-          }
 
           // Wait between turns
           await new Promise(resolve => setTimeout(resolve, this.TURN_DELAY));
@@ -280,24 +216,8 @@ class DebateOrchestrator {
       modelClass: 'large',
     });
 
-    // Validate and send message through PvPvAI client
     try {
-      const messageContent = {
-        timestamp: Date.now(),
-        roomId: pvpvaiClient.getRoomId(),
-        roundId: pvpvaiClient.getRoundId(),
-        agentId: agentId,
-        text: response
-      };
-
-      // Validate message
-      const validatedMessage = agentMessageInputSchema.parse({
-        messageType: WsMessageTypes.AGENT_MESSAGE,
-        signature: '', // Will be added by client
-        sender: character.settings?.pvpvai?.eth_wallet_address || '',
-        content: messageContent
-      });
-
+      // Send message through PvPvAI client
       await pvpvaiClient.sendAIMessage({ text: response });
 
       // Store in message history
@@ -313,28 +233,21 @@ class DebateOrchestrator {
         this.state.messageHistory.shift();
       }
 
-      // Simulate and apply PvP effect
-      const pvpEffect = this.simulatePvPEffect();
-      if (pvpEffect) {
-        const effect: PvpAllPvpActionsType = {
-          actionType: pvpEffect.type === PvpActions.POISON ? PvpActions.POISON : 
-                     pvpEffect.type === PvpActions.SILENCE ? PvpActions.SILENCE :
-                     pvpEffect.type === PvpActions.DEAFEN ? PvpActions.DEAFEN :
-                     PvpActions.BLIND,
+      // Random PvP test action through backend
+      if (Math.random() < this.PVP_CHANCE) {
+        const pvpEffect: PvpAllPvpActionsType = {
+          actionType: PvpActions.POISON,
           actionCategory: PvpActionCategories.STATUS_EFFECT,
           parameters: {
             target: agentId,
-            duration: 30 as const,
-            ...(pvpEffect.type === PvpActions.POISON ? {
-              find: pvpEffect.details?.find || '',
-              replace: pvpEffect.details?.replace || '',
-              case_sensitive: false
-            } : {})
+            duration: 30,
+            find: 'blockchain',
+            replace: 'sparklechain',
+            case_sensitive: false
           }
         };
 
-        await gmClient.applyPvPEffect(effect);
-        console.log('Applied PvP effect:', effect);
+        await gmClient.applyPvPEffect(pvpEffect);
       }
 
     } catch (error) {
