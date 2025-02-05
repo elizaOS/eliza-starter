@@ -42,7 +42,7 @@ export interface AgentMessage extends BaseMessage {
 export interface GMMessage extends BaseMessage {
   messageType: 'gm_message';
   content: {
-    gmId: string;          // Game Master's wallet address
+    gmId: number;          // Game Master's wallet address
     timestamp: number;
     targets: number[];     // Array of numeric agent IDs
     roomId: number;

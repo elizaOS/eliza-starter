@@ -254,24 +254,41 @@ export class GameMasterClient extends DirectClient {
     }
 
     try {
+      // First apply the effect to backend
       const response = await axios.post(
         `${this.endpoint}/rounds/${this.roundId}/pvp`,
-        effect,
+        {
+          actionType: effect.actionType,
+          effectId: effect.effectId,
+          sourceId: effect.sourceId,
+          targetId: effect.targetId,
+          duration: effect.duration,
+          createdAt: effect.createdAt,
+          expiresAt: effect.expiresAt,
+          details: effect.details
+        },
         { headers: { 'Content-Type': 'application/json' } }
       );
 
       if (response.data.success) {
+        // Update local state after successful backend update
         const targetEffects = this.activePvPEffects.get(effect.targetId) || [];
         targetEffects.push(effect);
         this.activePvPEffects.set(effect.targetId, targetEffects);
 
+        // Broadcast notification only after successful effect application
         await this.broadcastToRoom({
           text: `PvP effect ${effect.actionType} applied to Agent ${effect.targetId}`,
           roundId: this.roundId
         });
+
+        console.log('Successfully applied PvP effect:', effect);
+      } else {
+        throw new Error(response.data.error || 'Failed to apply PvP effect');
       }
     } catch (error) {
-      console.error('Error applying PvP effect:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Error applying PvP effect:', errorMessage);
       throw error;
     }
   }

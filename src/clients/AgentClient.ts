@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { DirectClient } from '@elizaos/client-direct';
 import { AgentMessage, AIResponse, GMMessage, MessageHistoryEntry } from './types.ts';
+import { PvPEffect, PvpActions } from './GameMasterClient.ts';
 
 export class AgentClient extends DirectClient {
   private readonly walletAddress: string;        // Wallet address for auth
@@ -17,6 +18,7 @@ export class AgentClient extends DirectClient {
   private readonly maxRetries = 3;
   private processingQueue = false;
   private isActive = true;
+  private activeEffects: PvPEffect[] = [];
   
   // Message context management
   private messageContext: MessageHistoryEntry[] = [];
@@ -54,6 +56,16 @@ export class AgentClient extends DirectClient {
       this.messageContext = history.slice(-this.MAX_CONTEXT_SIZE);
       console.log('Updated message context from GM:', this.messageContext);
     }
+
+    // Handle PvP effects
+    if (message.content.additionalData?.activePvPEffects) {
+      const effects = message.content.additionalData.activePvPEffects as PvPEffect[];
+      for (const effect of effects) {
+        if (effect.targetId === this.agentNumericId) {
+          await this.handlePvPEffect(effect);
+        }
+      }
+    }
   }
 
   private buildPromptWithContext(text: string): string {
@@ -81,6 +93,36 @@ Your response to the current topic: ${text}
     if (!this.roomId || !this.roundId) {
       throw new Error('Agent not initialized with room and round IDs');
     }
+
+    // Check if silenced
+    const silenced = this.activeEffects.some(
+      e => e.actionType === PvpActions.SILENCE && Date.now() < e.expiresAt
+    );
+    if (silenced) {
+      console.log(`Agent ${this.agentNumericId} is silenced, cannot send message`);
+      return;
+    }
+
+    // Apply POISON effects
+    let modifiedText = content.text;
+    const poisonEffects = this.activeEffects.filter(
+      e => e.actionType === PvpActions.POISON && Date.now() < e.expiresAt
+    );
+    
+    for (const effect of poisonEffects) {
+      if (effect.details) {
+        const regex = new RegExp(
+          effect.details.find,
+          effect.details.case_sensitive ? 'g' : 'gi'
+        );
+        modifiedText = modifiedText.replace(regex, effect.details.replace);
+        console.log(`Applied POISON effect to message:`, {
+          original: content.text,
+          modified: modifiedText,
+          effect
+        });
+      }
+    }
   
     const timestamp = Date.now();
     
@@ -90,7 +132,7 @@ Your response to the current topic: ${text}
       roomId: this.roomId,
       roundId: this.roundId,
       agentId: this.agentNumericId,
-      text: content.text,
+      text: modifiedText,
       context: {
         messageHistory: this.messageContext
       }
@@ -129,7 +171,7 @@ Your response to the current topic: ${text}
       this.messageContext.push({
         timestamp,
         agentId: this.agentNumericId,
-        text: content.text,
+        text: modifiedText,
         agentName: `Agent ${this.agentNumericId}`,
         role: 'agent'
       });
@@ -201,5 +243,14 @@ Your response to the current topic: ${text}
     this.isActive = false;
     this.messageContext = [];
     super.stop();
+  }
+
+  public async handlePvPEffect(effect: PvPEffect): Promise<void> {
+    // Store effect
+    this.activeEffects.push(effect);
+    console.log(`PvP effect applied to agent ${this.agentNumericId}:`, effect);
+
+    // Clean expired effects
+    this.activeEffects = this.activeEffects.filter(e => Date.now() < e.expiresAt);
   }
 }

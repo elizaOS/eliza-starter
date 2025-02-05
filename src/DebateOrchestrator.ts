@@ -210,8 +210,14 @@ class DebateOrchestrator {
 
   private async processAgentTurn(agent: ExtendedAgentRuntime) {
     const character = agent.character as any;
-    const chainName = character.agentRole?.name || 'Unknown';
-    
+    const agentId = character.settings?.pvpvai?.agentId;
+
+    // Check PvP effects before turn
+    if (this.isAffectedByPvP(agentId, 'SILENCE')) {
+      console.log(`Agent ${agent.character?.name} is silenced, skipping turn`);
+      return;
+    }
+
     // Generate response using chat history
     const response = await generateText({
       runtime: agent as AgentRuntime,
@@ -222,7 +228,7 @@ class DebateOrchestrator {
     // Store in message history
     this.state.messageHistory.push({
       agentId: character.settings?.pvpvai?.agentId,
-      agentName: chainName,
+      agentName: character.agentRole?.name || 'Unknown',
       text: response,
       timestamp: Date.now()
     });
@@ -236,6 +242,29 @@ class DebateOrchestrator {
     const pvpvaiClient = agent.clients?.pvpvai;
     if (pvpvaiClient) {
       await pvpvaiClient.sendAIMessage(response);
+
+      // Simulate and APPLY PvP effect
+      const pvpEffect = this.simulatePvPAction();
+      if (pvpEffect && this.gameMaster?.clients?.pvpvai) {
+        try {
+          // Get the GameMasterClient instance from PVPVAIIntegration
+          const gmClient = this.gameMaster.clients.pvpvai.getClient();
+          
+          await gmClient.applyPvPEffect({
+            effectId: crypto.randomUUID(),
+            actionType: pvpEffect.type,
+            sourceId: this.gameMaster.character.settings?.pvpvai?.eth_wallet_address || '',
+            targetId: agentId,
+            duration: pvpEffect.duration,
+            createdAt: Date.now(),
+            expiresAt: Date.now() + pvpEffect.duration,
+            details: pvpEffect.details
+          });
+          console.log('Applied PvP effect:', pvpEffect);
+        } catch (error) {
+          console.error('Failed to apply PvP effect:', error);
+        }
+      }
     }
   }
 
