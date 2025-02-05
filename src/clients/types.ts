@@ -15,6 +15,13 @@ export interface BaseMessage {
     roundId: number;        // Database ID of the round
   };
 }
+export interface MessageHistoryEntry {
+  timestamp: number;
+  agentId: number;
+  text: string;
+  agentName: string;
+  role: 'agent' | 'gm';
+}
 
 export interface BroadcastContent {
   text: string;

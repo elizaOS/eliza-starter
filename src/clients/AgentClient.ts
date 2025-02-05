@@ -1,25 +1,26 @@
-// AgentClient.ts
 import axios from 'axios';
 import { DirectClient } from '@elizaos/client-direct';
-import { AgentMessage, AIResponse } from './types.js';
-
-interface PendingMessage {
-  content: string;
-  timestamp: number;
-  retries: number;
-}
+import { AgentMessage, AIResponse, GMMessage, MessageHistoryEntry } from './types.ts';
 
 export class AgentClient extends DirectClient {
-  private readonly walletAddress: string;  // Ethereum wallet address
-  private readonly agentNumericId: number; // Database ID for agent
+  private readonly walletAddress: string;        // Wallet address for auth
+  private readonly agentNumericId: number;       // Database ID for agent
   private roomId: number;
   private roundId: number;
   private readonly endpoint: string;
   private readonly creatorId: number;
-  private readonly messageQueue: PendingMessage[] = [];
+  private readonly messageQueue: Array<{
+    content: string;
+    timestamp: number;
+    retries: number;
+  }> = [];
   private readonly maxRetries = 3;
   private processingQueue = false;
   private isActive = true;
+  
+  // Message context management
+  private messageContext: MessageHistoryEntry[] = [];
+  private readonly MAX_CONTEXT_SIZE = 8;
 
   constructor(
     endpoint: string,
@@ -47,6 +48,35 @@ export class AgentClient extends DirectClient {
     this.roundId = roundId;
   }
 
+  public async handleGMMessage(message: GMMessage): Promise<void> {
+    const history = message.content.additionalData?.messageHistory;
+    if (history && Array.isArray(history)) {
+      this.messageContext = history.slice(-this.MAX_CONTEXT_SIZE);
+      console.log('Updated message context from GM:', this.messageContext);
+    }
+  }
+
+  private buildPromptWithContext(text: string): string {
+    let prompt = `You are participating in a crypto debate. Your message should be a direct response to the conversation context below.
+
+Previous messages:
+${this.messageContext.map(msg => 
+  `${msg.agentName} (${msg.role}): ${msg.text}`
+).join('\n')}
+
+Based on this context, respond with your perspective on the discussion. Remember to:
+1. Reference specific points made by others
+2. Stay in character as your assigned chain advocate
+3. Keep responses clear and focused
+4. Support your arguments with technical merits
+5. Maintain a professional but passionate tone
+
+Your response to the current topic: ${text}
+`;
+
+    return prompt;
+  }
+
   public async sendAIMessage(content: { text: string }): Promise<void> {
     if (!this.roomId || !this.roundId) {
       throw new Error('Agent not initialized with room and round IDs');
@@ -54,26 +84,30 @@ export class AgentClient extends DirectClient {
   
     const timestamp = Date.now();
     
-    // Construct message content
+    // Build message with context
     const messageContent = {
       timestamp,
       roomId: this.roomId,
       roundId: this.roundId,
       agentId: this.agentNumericId,
-      text: content.text
+      text: content.text,
+      context: {
+        messageHistory: this.messageContext
+      }
     };
-  
+
     const signature = this.generateDevSignature(messageContent);
-  
+
     const message: AgentMessage = {
       messageType: 'agent_message',
       signature,
       sender: this.walletAddress,
       content: messageContent
     };
-  
+
     try {
-      console.log("Sending message to", this.endpoint, JSON.stringify(message, null, 2));
+      console.log("Sending message with context:", message);
+
       const response = await axios.post<AIResponse>(
         `${this.endpoint}/messages/agentMessage`,
         message,
@@ -83,22 +117,30 @@ export class AgentClient extends DirectClient {
           }
         }
       );
-  
-      console.log("Response from backend:", response.data);
-  
-      // Check for explicit error only - backend returns message/data on success
+
       if (response.data.error) {
         throw new Error(response.data.error);
       }
-  
-      // If we got here, message was processed successfully
-      return;
+
+      // Update own context with sent message
+      if (this.messageContext.length >= this.MAX_CONTEXT_SIZE) {
+        this.messageContext.shift(); // Remove oldest message
+      }
+      this.messageContext.push({
+        timestamp,
+        agentId: this.agentNumericId,
+        text: content.text,
+        agentName: `Agent ${this.agentNumericId}`,
+        role: 'agent'
+      });
+
     } catch (error) {
       console.error('Error sending AI message:', error);
       this.queueMessage(content.text, timestamp);
       throw error;
     }
   }
+
   // Development signature for testing
   private generateDevSignature(content: any): string {
     const messageStr = JSON.stringify(content);
@@ -118,7 +160,6 @@ export class AgentClient extends DirectClient {
     }
   }
 
-  // Process queued messages with retry
   private async processQueue() {
     if (!this.isActive || this.messageQueue.length === 0) {
       this.processingQueue = false;
@@ -158,6 +199,7 @@ export class AgentClient extends DirectClient {
 
   public override stop(): void {
     this.isActive = false;
+    this.messageContext = [];
     super.stop();
   }
 }

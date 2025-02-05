@@ -1,5 +1,29 @@
 import { AgentRuntime, generateText, stringToUuid, type UUID } from '@elizaos/core';
-import type { ExtendedAgentRuntime, PVPVAISettings } from './types/index.ts';
+import type { ExtendedAgentRuntime } from './types/index.ts';
+
+// Types for PvP simulation
+interface PvPEffect {
+  type: 'SILENCE' | 'DEAFEN' | 'POISON';
+  targetId: number;
+  duration: number;  // in milliseconds
+  startTime: number;
+  details?: {
+    find?: string;
+    replace?: string;
+  };
+}
+
+interface DebateState {
+  phase: 'init' | 'discussion' | 'voting' | 'end';
+  currentTurn: number;
+  messageHistory: Array<{
+    agentId: number;
+    agentName: string;
+    text: string;
+    timestamp: number;
+  }>;
+  activePvPEffects: PvPEffect[];
+}
 
 class DebateOrchestrator {
   private agents: ExtendedAgentRuntime[] = [];
@@ -8,6 +32,20 @@ class DebateOrchestrator {
   private currentTopicId: UUID;
   private roomId?: number;
   private roundId?: number;
+
+  // Debate state management
+  private state: DebateState = {
+    phase: 'init',
+    currentTurn: 0,
+    messageHistory: [],
+    activePvPEffects: []
+  };
+
+  // Configuration
+  private readonly TURN_DELAY = 5000;  // 5 seconds between turns
+  private readonly ROUND_DELAY = 10000; // 10 seconds between rounds
+  private readonly PVP_CHANCE = 0.2;   // 20% chance of PvP action per turn
+  private readonly MAX_HISTORY = 8;     // Max messages in history
 
   constructor(runtimes: ExtendedAgentRuntime[]) {
     this.currentTopicId = stringToUuid('debate-topic') as UUID;
@@ -28,21 +66,62 @@ class DebateOrchestrator {
     });
   }
 
+  // Simulate a random PvP action
+  private simulatePvPAction(): PvPEffect | null {
+    if (Math.random() > this.PVP_CHANCE) return null;
+
+    const types: PvPEffect['type'][] = ['SILENCE', 'DEAFEN', 'POISON'];
+    const type = types[Math.floor(Math.random() * types.length)];
+    const targetAgent = this.agents[Math.floor(Math.random() * this.agents.length)];
+    const targetId = (targetAgent.character as any).settings?.pvpvai?.agentId;
+
+    const effect: PvPEffect = {
+      type,
+      targetId,
+      duration: 30000, // 30 seconds
+      startTime: Date.now()
+    };
+
+    // Add POISON replacement text if needed
+    if (type === 'POISON') {
+      effect.details = {
+        find: 'blockchain',
+        replace: 'sparklechain'
+      };
+    }
+
+    return effect;
+  }
+
+  // Check if an agent is affected by a PvP effect
+  private isAffectedByPvP(agentId: number, type: PvPEffect['type']): boolean {
+    return this.state.activePvPEffects.some(effect => 
+      effect.targetId === agentId && 
+      effect.type === type && 
+      Date.now() - effect.startTime < effect.duration
+    );
+  }
+
+  // Clean up expired PvP effects
+  private cleanupPvPEffects() {
+    this.state.activePvPEffects = this.state.activePvPEffects.filter(effect =>
+      Date.now() - effect.startTime < effect.duration
+    );
+  }
+
   public async startDebate() {
     try {
       this.isDebating = true;
+      this.state.phase = 'init';
 
       if (!this.gameMaster) {
         throw new Error('GameMaster not found!');
       }
 
-      // Initialize GM client
+      // Initialize GM and setup
       const gmClient = this.gameMaster.clients?.pvpvai;
-      if (!gmClient) {
-        throw new Error('GM client not initialized');
-      }
+      if (!gmClient) throw new Error('GM client not initialized');
 
-      console.log('Initializing GameMaster client...');
       await gmClient.initialize();
 
       // Get and verify room/round IDs
@@ -50,43 +129,15 @@ class DebateOrchestrator {
       this.roomId = settings?.roomId;
       this.roundId = settings?.roundId;
 
-      console.log('Room and Round IDs:', { roomId: this.roomId, roundId: this.roundId });
-
       if (!this.roomId || !this.roundId) {
         throw new Error('Room/Round initialization failed - missing IDs');
       }
 
-      // Initialize agent clients with room/round IDs
-      console.log('Initializing agent clients...');
-      for (const agent of this.agents) {
-        try {
-          const client = agent.clients?.pvpvai?.getClient();
-          if (!client) {
-            console.error(`No PvPvAI client found for agent ${agent.character?.name}`);
-            continue;
-          }
+      // Initialize agents
+      await this.initializeAgents();
 
-          if ('setRoomAndRound' in client) {
-            client.setRoomAndRound(this.roomId, this.roundId);
-            console.log(`Initialized agent ${agent.character?.name} with room ${this.roomId} and round ${this.roundId}`);
-          }
-
-          // Update agent's settings
-          const agentSettings = (agent.character as any).settings?.pvpvai;
-          if (agentSettings) {
-            agentSettings.roomId = this.roomId;
-            agentSettings.roundId = this.roundId;
-          }
-        } catch (error) {
-          console.error(`Failed to initialize agent ${agent.character?.name}:`, error);
-        }
-      }
-
-      // Wait for initialization
-      console.log('Waiting for initializations to complete...');
-      await new Promise(resolve => setTimeout(resolve, 5000));
-
-      // Start debate loop
+      // Start discussion phase
+      this.state.phase = 'discussion';
       await this.debateLoop();
     } catch (error) {
       console.error('Error in startDebate:', error);
@@ -94,75 +145,106 @@ class DebateOrchestrator {
     }
   }
 
+  private async initializeAgents() {
+    console.log('Initializing agent clients...');
+    for (const agent of this.agents) {
+      try {
+        const client = agent.clients?.pvpvai?.getClient();
+        if (!client || !('setRoomAndRound' in client)) continue;
+
+        client.setRoomAndRound(this.roomId!, this.roundId!);
+        
+        // Update agent settings
+        const agentSettings = (agent.character as any).settings?.pvpvai;
+        if (agentSettings) {
+          agentSettings.roomId = this.roomId;
+          agentSettings.roundId = this.roundId;
+        }
+      } catch (error) {
+        console.error(`Failed to initialize agent ${agent.character?.name}:`, error);
+      }
+    }
+  }
+
   private async debateLoop() {
     console.log(`Starting debate loop with ${this.agents.length} agents`);
     
-    while (this.isDebating) {
+    while (this.isDebating && this.state.phase === 'discussion') {
+      // Cleanup expired PvP effects
+      this.cleanupPvPEffects();
+
+      // Process each agent's turn
       for (const agent of this.agents) {
         if (!this.isDebating) break;
 
         try {
-          const pvpvaiClient = agent.clients?.pvpvai;
-          if (!pvpvaiClient) {
-            console.error(`Missing PvPvAI client for agent ${agent.character?.name}`);
+          // Check for PvP effects
+          const agentId = (agent.character as any).settings?.pvpvai?.agentId;
+          if (this.isAffectedByPvP(agentId, 'SILENCE')) {
+            console.log(`Agent ${agent.character?.name} is silenced, skipping turn`);
             continue;
           }
 
-          const character = agent.character as any;
-          const chainName = character.agentRole?.name || 'Unknown';
-          console.log(`Agent ${chainName} generating response...`);
+          // Generate and send message
+          await this.processAgentTurn(agent);
 
-          // Get recent messages for context
-          const recentMessages = await agent.messageManager.getMemories({ 
-            roomId: stringToUuid(this.roomId?.toString() || ''),
-            count: 5 
-          });
-
-          // Generate response
-          const response = await generateText({
-            runtime: agent as AgentRuntime,
-            context: this.buildPrompt(agent, recentMessages),
-            modelClass: 'large',
-          });
-
-          console.log(`Generated response for ${chainName}:`, response);
-
-          // Store message in agent's memory
-          await agent.messageManager.createMemory({
-            content: {
-              text: response,
-              inReplyTo: this.currentTopicId
-            },
-            roomId: stringToUuid(this.roomId?.toString() || ''),
-            userId: stringToUuid(character.settings?.pvpvai?.creatorId?.toString() || ''),
-            agentId: stringToUuid(character.settings?.pvpvai?.agentId?.toString() || '')
-          });
-
-          // Send message through PvPvAI client
-          try {
-            await pvpvaiClient.sendAIMessage(response);
-            console.log(`Agent ${chainName} message sent successfully`);
-          } catch (error) {
-            console.error(`Failed to send message for ${chainName}:`, error);
+          // Simulate random PvP action after turn
+          const pvpEffect = this.simulatePvPAction();
+          if (pvpEffect) {
+            console.log('Simulated PvP effect:', pvpEffect);
+            this.state.activePvPEffects.push(pvpEffect);
           }
 
-          // Wait between agent messages
-          await new Promise(resolve => setTimeout(resolve, 5000));
+          // Wait between turns
+          await new Promise(resolve => setTimeout(resolve, this.TURN_DELAY));
 
         } catch (error) {
-          console.error(`Error in debate loop for agent ${agent.character?.name}:`, error);
+          console.error(`Error processing turn for ${agent.character?.name}:`, error);
         }
       }
 
       // Wait between rounds
-      await new Promise(resolve => setTimeout(resolve, 10000));
+      await new Promise(resolve => setTimeout(resolve, this.ROUND_DELAY));
     }
   }
 
-  private buildPrompt(agent: ExtendedAgentRuntime, recentMessages: any[]): string {
+  private async processAgentTurn(agent: ExtendedAgentRuntime) {
+    const character = agent.character as any;
+    const chainName = character.agentRole?.name || 'Unknown';
+    
+    // Generate response using chat history
+    const response = await generateText({
+      runtime: agent as AgentRuntime,
+      context: this.buildPrompt(agent),
+      modelClass: 'large',
+    });
+
+    // Store in message history
+    this.state.messageHistory.push({
+      agentId: character.settings?.pvpvai?.agentId,
+      agentName: chainName,
+      text: response,
+      timestamp: Date.now()
+    });
+
+    // Trim history if needed
+    if (this.state.messageHistory.length > this.MAX_HISTORY) {
+      this.state.messageHistory.shift();
+    }
+
+    // Send through PvPvAI client
+    const pvpvaiClient = agent.clients?.pvpvai;
+    if (pvpvaiClient) {
+      await pvpvaiClient.sendAIMessage(response);
+    }
+  }
+
+  private buildPrompt(agent: ExtendedAgentRuntime): string {
     const character = agent.character as any;
     const chainName = character.agentRole?.name;
-    const messageHistory = recentMessages.map(m => m.content.text).join('\n');
+    const messageHistory = this.state.messageHistory
+      .map(m => `${m.agentName}: ${m.text}`)
+      .join('\n');
 
     return `You are ${chainName}, ${character.agentRole.description}.
 Previous messages:
@@ -183,6 +265,7 @@ Response:`;
   public stopDebate() {
     console.log('Stopping debate...');
     this.isDebating = false;
+    this.state.phase = 'end';
   }
 }
 
