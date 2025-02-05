@@ -11,8 +11,8 @@
             "roundId": 1, 
             "endpoint": "http://localhost:3000",
             "type": "AGENT",
-            "agentId": 56,
-            "eth_wallet_address": "0x2345678901234567890123456789012345678901",
+            "agentId": 57,
+            "eth_wallet_address": "0x5Ea5768da3659775760b0dB30a85b97D7D148d2b",
             "solana_wallet_address": "Solana000000000000000000000000000473c47f7b9447",
             "creatorId": 1
         }

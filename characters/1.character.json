@@ -26,7 +26,7 @@
             "endpoint": "http://localhost:3000",
             "type": "AGENT",
             "agentId": 50,
-            "eth_wallet_address": "0x00000000000000000000000000008c02a590286d",
+            "eth_wallet_address": "0xaF54Ae86628557B5F0b84d73c9c57128bCa0e6a2",
             "solana_wallet_address": "Solana000000000000000000000000000473c47f7b9447",
             "creatorId": 1
         }

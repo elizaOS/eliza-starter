@@ -1,11 +1,22 @@
+// IMPORTANT: Message Signing Protocol
+// All messages are deterministically stringified by sorting object keys recursively (using sortObjectKeys)
+// before signing. Ensure the client and server use the identical sorting function.
+
 import axios from 'axios';
 import { DirectClient } from '@elizaos/client-direct';
-import { AgentMessage, AIResponse, GMMessage, MessageHistoryEntry } from './types.ts';
-import { PvPEffect, PvpActions } from './GameMasterClient.ts';
+import { AIResponse, MessageHistoryEntry } from './types.ts';
+import { agentMessageInputSchema, gmMessageInputSchema, observationMessageInputSchema } from '../types/schemas.ts';
+import { WsMessageTypes } from '../types/ws.ts';
+import { z } from 'zod';
+import { PvPEffect } from '../types/schemas.ts';
+import { PvpActions } from '../types/pvp.ts';
+import { ethers } from 'ethers';
+import { sortObjectKeys } from './sortObjectKeys.ts';  // Imported shared sortObjectKeys
+
 
 export class AgentClient extends DirectClient {
-  private readonly walletAddress: string;        // Wallet address for auth
-  private readonly agentNumericId: number;       // Database ID for agent
+  private readonly walletAddress: string;
+  private readonly agentNumericId: number;
   private roomId: number;
   private roundId: number;
   private readonly endpoint: string;
@@ -19,23 +30,37 @@ export class AgentClient extends DirectClient {
   private processingQueue = false;
   private isActive = true;
   private activeEffects: PvPEffect[] = [];
-  
-  // Message context management
   private messageContext: MessageHistoryEntry[] = [];
   private readonly MAX_CONTEXT_SIZE = 8;
+  private readonly wallet: ethers.Wallet;  // Use the existing wallet property
+
 
   constructor(
     endpoint: string,
-    walletAddress: string,   // Wallet address for auth
-    creatorId: number,       // User ID who created the agent
-    agentNumericId: number   // Database ID for agent
+    walletAddress: string,
+    creatorId: number,
+    agentNumericId: number
   ) {
     super();
     this.endpoint = endpoint;
     this.walletAddress = walletAddress;
     this.creatorId = creatorId;
     this.agentNumericId = agentNumericId;
-    
+
+    const privateKey = process.env[`AGENT_${agentNumericId}_PRIVATE_KEY`] || process.env.AGENT_PRIVATE_KEY;
+    if (!privateKey) {
+      throw new Error(`Private key not found for agent ${agentNumericId}`);
+    }
+
+    const derivedWallet = new ethers.Wallet(privateKey);
+    if (derivedWallet.address.toLowerCase() !== walletAddress.toLowerCase()) {
+      throw new Error(
+        `Private key mismatch - derived address ${derivedWallet.address} does not match expected ${walletAddress}`
+      );
+    }
+
+    this.wallet = derivedWallet; // Assign to the class property
+
     console.log(`AgentClient initialized:`, {
       endpoint,
       walletAddress,
@@ -50,26 +75,41 @@ export class AgentClient extends DirectClient {
     this.roundId = roundId;
   }
 
-  public async handleGMMessage(message: GMMessage): Promise<void> {
-    const history = message.content.additionalData?.messageHistory;
-    if (history && Array.isArray(history)) {
-      this.messageContext = history.slice(-this.MAX_CONTEXT_SIZE);
-      console.log('Updated message context from GM:', this.messageContext);
-    }
+  public async handleGMMessage(message: z.infer<typeof gmMessageInputSchema>): Promise<void> {
+    try {
+      const validatedMessage = gmMessageInputSchema.parse(message);
+      const deafened = this.activeEffects.some(
+        e => e.actionType === PvpActions.DEAFEN && Date.now() < e.expiresAt
+      );
 
-    // Handle PvP effects
-    if (message.content.additionalData?.activePvPEffects) {
-      const effects = message.content.additionalData.activePvPEffects as PvPEffect[];
-      for (const effect of effects) {
-        if (effect.targetId === this.agentNumericId) {
-          await this.handlePvPEffect(effect);
+      if (!deafened) {
+        if (this.messageContext.length >= this.MAX_CONTEXT_SIZE) {
+          this.messageContext.shift();
+        }
+
+        this.messageContext.push({
+          timestamp: validatedMessage.content.timestamp,
+          agentId: 51, // GM ID
+          text: validatedMessage.content.message,
+          agentName: 'Game Master',
+          role: 'gm'
+        });
+
+        if (validatedMessage.content.additionalData?.activePvPEffects) {
+          for (const effect of validatedMessage.content.additionalData.activePvPEffects) {
+            await this.handlePvPEffect(effect);
+          }
         }
       }
+    } catch (error) {
+      console.error('Invalid GM message:', error);
+      throw error;
     }
   }
 
   private buildPromptWithContext(text: string): string {
-    let prompt = `You are participating in a crypto debate. Your message should be a direct response to the conversation context below.
+
+      let prompt = `You are participating in a crypto debate. Your message should be a direct response to the conversation context below.
 
 Previous messages:
 ${this.messageContext.map(msg => 
@@ -85,8 +125,8 @@ Based on this context, respond with your perspective on the discussion. Remember
 
 Your response to the current topic: ${text}
 `;
-
     return prompt;
+
   }
 
   public async sendAIMessage(content: { text: string }): Promise<void> {
@@ -94,7 +134,6 @@ Your response to the current topic: ${text}
       throw new Error('Agent not initialized with room and round IDs');
     }
 
-    // Check if silenced
     const silenced = this.activeEffects.some(
       e => e.actionType === PvpActions.SILENCE && Date.now() < e.expiresAt
     );
@@ -103,12 +142,11 @@ Your response to the current topic: ${text}
       return;
     }
 
-    // Apply POISON effects
     let modifiedText = content.text;
     const poisonEffects = this.activeEffects.filter(
       e => e.actionType === PvpActions.POISON && Date.now() < e.expiresAt
     );
-    
+
     for (const effect of poisonEffects) {
       if (effect.details) {
         const regex = new RegExp(
@@ -123,32 +161,37 @@ Your response to the current topic: ${text}
         });
       }
     }
-  
+
     const timestamp = Date.now();
-    
-    // Build message with context
-    const messageContent = {
+
+    // Extract core content for signing only
+    const signedContent = {
       timestamp,
       roomId: this.roomId,
       roundId: this.roundId,
       agentId: this.agentNumericId,
-      text: modifiedText,
-      context: {
-        messageHistory: this.messageContext
-      }
+      text: modifiedText
     };
 
-    const signature = this.generateDevSignature(messageContent);
+    // Generate signature on the core content
+    const signature = await this.generateDevSignature(signedContent);
 
-    const message: AgentMessage = {
-      messageType: 'agent_message',
+    // Build full message including context separately
+    const message = agentMessageInputSchema.parse({
+      messageType: WsMessageTypes.AGENT_MESSAGE,
       signature,
       sender: this.walletAddress,
-      content: messageContent
-    };
+      content: {
+        ...signedContent,
+        context: {
+          messageHistory: this.messageContext
+        }
+      }
+    });
 
     try {
-      console.log("Sending message with context:", message);
+      const truncatedSignature = signature.substring(0, 5) + "...";
+      console.log(`Sending message with context: {..., signature: ${truncatedSignature}, ...}`);
 
       const response = await axios.post<AIResponse>(
         `${this.endpoint}/messages/agentMessage`,
@@ -164,9 +207,8 @@ Your response to the current topic: ${text}
         throw new Error(response.data.error);
       }
 
-      // Update own context with sent message
       if (this.messageContext.length >= this.MAX_CONTEXT_SIZE) {
-        this.messageContext.shift(); // Remove oldest message
+        this.messageContext.shift();
       }
       this.messageContext.push({
         timestamp,
@@ -178,18 +220,31 @@ Your response to the current topic: ${text}
 
     } catch (error) {
       console.error('Error sending AI message:', error);
-      this.queueMessage(content.text, timestamp);
+      this.queueMessage(content.text, timestamp);  // Keep original text for retries
       throw error;
     }
   }
 
-  // Development signature for testing
-  private generateDevSignature(content: any): string {
-    const messageStr = JSON.stringify(content);
-    return Buffer.from(`${this.walletAddress}:${messageStr}:${content.timestamp}`).toString('base64');
+  private async generateDevSignature(content: any): Promise<string> {
+    try {
+      // Log the content being signed for debugging purposes
+      console.log('Signing content:', content);
+      // Use deterministic stringification via sorted keys
+      const messageString = JSON.stringify(sortObjectKeys(content));
+      const signature = await this.wallet.signMessage(messageString);
+
+      // Local verification using the same sorted string
+      const recoveredAddress = ethers.verifyMessage(messageString, signature);
+      if (recoveredAddress.toLowerCase() !== this.walletAddress.toLowerCase()) {
+        throw new Error(`Signature verification failed locally - recovered ${recoveredAddress} but expected ${this.walletAddress}`);
+      }
+      return signature;
+    } catch (error) {
+      console.error('Error generating signature:', error);
+      throw error;
+    }
   }
 
-  // Message retry queue
   private queueMessage(content: string, timestamp: number) {
     this.messageQueue.push({
       content,
@@ -245,12 +300,43 @@ Your response to the current topic: ${text}
     super.stop();
   }
 
-  public async handlePvPEffect(effect: PvPEffect): Promise<void> {
+    public async handlePvPEffect(effect: PvPEffect): Promise<void> {
     // Store effect
     this.activeEffects.push(effect);
     console.log(`PvP effect applied to agent ${this.agentNumericId}:`, effect);
 
     // Clean expired effects
     this.activeEffects = this.activeEffects.filter(e => Date.now() < e.expiresAt);
+  }
+
+  // Modified to only handle GM-validated observations
+  public async handleObservation(observation: z.infer<typeof observationMessageInputSchema>): Promise<void> {
+    try {
+      // Check if agent is blinded before processing
+      if (this.activeEffects.some(
+        e => e.actionType === PvpActions.BLIND && Date.now() < e.expiresAt
+      )) {
+        console.log(`Agent ${this.agentNumericId} is blinded, ignoring observation`);
+        return;
+      }
+      
+      // Store in message context if in current round
+      if (observation.content.roundId === this.roundId) {
+        if (this.messageContext.length >= this.MAX_CONTEXT_SIZE) {
+          this.messageContext.shift();
+        }
+        
+        this.messageContext.push({
+          timestamp: observation.content.timestamp,
+          agentId: observation.content.agentId,
+          text: `Observation: ${JSON.stringify(observation.content.data)}`,
+          agentName: 'Oracle',
+          role: 'agent'
+        });
+      }
+    } catch (error) {
+      console.error('Error handling observation:', error);
+      throw error;
+    }
   }
 }

@@ -1,17 +1,18 @@
+import { z } from 'zod';
 import { AgentRuntime, generateText, stringToUuid, type UUID } from '@elizaos/core';
 import type { ExtendedAgentRuntime } from './types/index.ts';
+import { 
+  agentMessageInputSchema,
+  gmMessageInputSchema,
+  observationMessageInputSchema,
+  PvPEffect,
+  PvpAllPvpActionsType
+} from './types/schemas.ts';
+import { PvpActions, PvpActionCategories } from './types/pvp.ts';
+import { WsMessageTypes } from './types/ws.ts';
+import axios from 'axios';
 
-// Types for PvP simulation
-interface PvPEffect {
-  type: 'SILENCE' | 'DEAFEN' | 'POISON';
-  targetId: number;
-  duration: number;  // in milliseconds
-  startTime: number;
-  details?: {
-    find?: string;
-    replace?: string;
-  };
-}
+
 
 interface DebateState {
   phase: 'init' | 'discussion' | 'voting' | 'end';
@@ -67,45 +68,42 @@ class DebateOrchestrator {
   }
 
   // Simulate a random PvP action
-  private simulatePvPAction(): PvPEffect | null {
+  private simulatePvPEffect(): {
+    type: PvpActions;
+    details?: { find: string; replace: string };
+  } | null {
     if (Math.random() > this.PVP_CHANCE) return null;
 
-    const types: PvPEffect['type'][] = ['SILENCE', 'DEAFEN', 'POISON'];
+    const types = [PvpActions.SILENCE, PvpActions.DEAFEN, PvpActions.POISON];
     const type = types[Math.floor(Math.random() * types.length)];
-    const targetAgent = this.agents[Math.floor(Math.random() * this.agents.length)];
-    const targetId = (targetAgent.character as any).settings?.pvpvai?.agentId;
-
-    const effect: PvPEffect = {
-      type,
-      targetId,
-      duration: 30000, // 30 seconds
-      startTime: Date.now()
-    };
-
-    // Add POISON replacement text if needed
-    if (type === 'POISON') {
-      effect.details = {
-        find: 'blockchain',
-        replace: 'sparklechain'
+    
+    if (type === PvpActions.POISON) {
+      return {
+        type,
+        details: {
+          find: 'blockchain',
+          replace: 'sparklechain'
+        }
       };
     }
 
-    return effect;
+    return { type };
   }
 
   // Check if an agent is affected by a PvP effect
-  private isAffectedByPvP(agentId: number, type: PvPEffect['type']): boolean {
+  private isAffectedByPvP(agentId: number, actionType: PvpActions): boolean {
     return this.state.activePvPEffects.some(effect => 
       effect.targetId === agentId && 
-      effect.type === type && 
-      Date.now() - effect.startTime < effect.duration
+      effect.actionType === actionType && 
+      Date.now() < effect.expiresAt
     );
   }
 
   // Clean up expired PvP effects
   private cleanupPvPEffects() {
-    this.state.activePvPEffects = this.state.activePvPEffects.filter(effect =>
-      Date.now() - effect.startTime < effect.duration
+    const now = Date.now();
+    this.state.activePvPEffects = this.state.activePvPEffects.filter(effect => 
+      now < effect.expiresAt
     );
   }
 
@@ -147,12 +145,61 @@ class DebateOrchestrator {
 
   private async initializeAgents() {
     console.log('Initializing agent clients...');
-    for (const agent of this.agents) {
-      try {
-        const client = agent.clients?.pvpvai?.getClient();
-        if (!client || !('setRoomAndRound' in client)) continue;
+    
+    try {
+      // First ensure GM is initialized to create room/round
+      if (!this.gameMaster?.clients?.pvpvai) {
+        throw new Error('GM client not initialized');
+      }
+      const gmClient = this.gameMaster.clients.pvpvai;
+      await gmClient.initialize();
 
-        client.setRoomAndRound(this.roomId!, this.roundId!);
+      // Get room/round IDs from GM
+      const settings = (this.gameMaster.character as any).settings?.pvpvai;
+      this.roomId = settings?.roomId;
+      this.roundId = settings?.roundId;
+
+      if (!this.roomId || !this.roundId) {
+        throw new Error('Room/Round initialization failed - missing IDs');
+      }
+
+      // Bulk register agents with the room // NOT SURE WHERE THIS SHOULD BE, could be in the gamemaster client as well
+      const agentsToRegister = this.agents.map(agent => {
+        const settings = (agent.character as any).settings?.pvpvai;
+        if (!settings?.agentId || !settings?.eth_wallet_address) {
+          throw new Error(`Missing agent ID or wallet for ${agent.character?.name}`);
+        }
+        return {
+          id: settings.agentId,
+          walletAddress: settings.eth_wallet_address
+        };
+      });
+
+      // Register agents with room via backend
+      const response = await axios.post(
+        `${gmClient.getClient().endpoint}/rooms/${this.roomId}/agents/bulk`,
+        { agents: agentsToRegister },
+        { headers: { 'Content-Type': 'application/json' } }
+      );
+
+      if (!response.data || response.status !== 200) {
+        throw new Error('Failed to register agents with room');
+      }
+
+      // Initialize each agent's client with room/round IDs
+      for (const agent of this.agents) {
+        const client = agent.clients?.pvpvai;
+        if (!client) {
+          throw new Error(`Agent ${agent.character?.name} missing pvpvai client`);
+        }
+
+        const pvpvaiClient = client.getClient();
+        if (!pvpvaiClient || !('setRoomAndRound' in pvpvaiClient)) {
+          throw new Error(`Agent ${agent.character?.name} has invalid pvpvai client`);
+        }
+
+        // Set room and round
+        pvpvaiClient.setRoomAndRound(this.roomId!, this.roundId!);
         
         // Update agent settings
         const agentSettings = (agent.character as any).settings?.pvpvai;
@@ -160,9 +207,17 @@ class DebateOrchestrator {
           agentSettings.roomId = this.roomId;
           agentSettings.roundId = this.roundId;
         }
-      } catch (error) {
-        console.error(`Failed to initialize agent ${agent.character?.name}:`, error);
+
+        console.log(`Initialized agent ${agent.character?.name} with:`, {
+          roomId: this.roomId,
+          roundId: this.roundId,
+          hasClient: !!pvpvaiClient
+        });
       }
+
+    } catch (error) {
+      console.error('Failed to initialize agents:', error);
+      throw error;
     }
   }
 
@@ -180,7 +235,7 @@ class DebateOrchestrator {
         try {
           // Check for PvP effects
           const agentId = (agent.character as any).settings?.pvpvai?.agentId;
-          if (this.isAffectedByPvP(agentId, 'SILENCE')) {
+          if (this.isAffectedByPvP(agentId, PvpActions.SILENCE)) { // Use enum instead of string
             console.log(`Agent ${agent.character?.name} is silenced, skipping turn`);
             continue;
           }
@@ -189,7 +244,7 @@ class DebateOrchestrator {
           await this.processAgentTurn(agent);
 
           // Simulate random PvP action after turn
-          const pvpEffect = this.simulatePvPAction();
+          const pvpEffect = this.simulatePvPEffect();
           if (pvpEffect) {
             console.log('Simulated PvP effect:', pvpEffect);
             this.state.activePvPEffects.push(pvpEffect);
@@ -211,11 +266,11 @@ class DebateOrchestrator {
   private async processAgentTurn(agent: ExtendedAgentRuntime) {
     const character = agent.character as any;
     const agentId = character.settings?.pvpvai?.agentId;
+    const pvpvaiClient = agent.clients?.pvpvai?.getClient();
+    const gmClient = this.gameMaster?.clients?.pvpvai?.getClient();
 
-    // Check PvP effects before turn
-    if (this.isAffectedByPvP(agentId, 'SILENCE')) {
-      console.log(`Agent ${agent.character?.name} is silenced, skipping turn`);
-      return;
+    if (!pvpvaiClient || !gmClient) {
+      throw new Error('Missing required clients');
     }
 
     // Generate response using chat history
@@ -225,46 +280,66 @@ class DebateOrchestrator {
       modelClass: 'large',
     });
 
-    // Store in message history
-    this.state.messageHistory.push({
-      agentId: character.settings?.pvpvai?.agentId,
-      agentName: character.agentRole?.name || 'Unknown',
-      text: response,
-      timestamp: Date.now()
-    });
+    // Validate and send message through PvPvAI client
+    try {
+      const messageContent = {
+        timestamp: Date.now(),
+        roomId: pvpvaiClient.getRoomId(),
+        roundId: pvpvaiClient.getRoundId(),
+        agentId: agentId,
+        text: response
+      };
 
-    // Trim history if needed
-    if (this.state.messageHistory.length > this.MAX_HISTORY) {
-      this.state.messageHistory.shift();
-    }
+      // Validate message
+      const validatedMessage = agentMessageInputSchema.parse({
+        messageType: WsMessageTypes.AGENT_MESSAGE,
+        signature: '', // Will be added by client
+        sender: character.settings?.pvpvai?.eth_wallet_address || '',
+        content: messageContent
+      });
 
-    // Send through PvPvAI client
-    const pvpvaiClient = agent.clients?.pvpvai;
-    if (pvpvaiClient) {
-      await pvpvaiClient.sendAIMessage(response);
+      await pvpvaiClient.sendAIMessage({ text: response });
 
-      // Simulate and APPLY PvP effect
-      const pvpEffect = this.simulatePvPAction();
-      if (pvpEffect && this.gameMaster?.clients?.pvpvai) {
-        try {
-          // Get the GameMasterClient instance from PVPVAIIntegration
-          const gmClient = this.gameMaster.clients.pvpvai.getClient();
-          
-          await gmClient.applyPvPEffect({
-            effectId: crypto.randomUUID(),
-            actionType: pvpEffect.type,
-            sourceId: this.gameMaster.character.settings?.pvpvai?.eth_wallet_address || '',
-            targetId: agentId,
-            duration: pvpEffect.duration,
-            createdAt: Date.now(),
-            expiresAt: Date.now() + pvpEffect.duration,
-            details: pvpEffect.details
-          });
-          console.log('Applied PvP effect:', pvpEffect);
-        } catch (error) {
-          console.error('Failed to apply PvP effect:', error);
-        }
+      // Store in message history
+      this.state.messageHistory.push({
+        agentId: agentId,
+        agentName: character.agentRole?.name || 'Unknown',
+        text: response,
+        timestamp: Date.now()
+      });
+
+      // Trim history if needed
+      if (this.state.messageHistory.length > this.MAX_HISTORY) {
+        this.state.messageHistory.shift();
       }
+
+      // Simulate and apply PvP effect
+      const pvpEffect = this.simulatePvPEffect();
+      if (pvpEffect) {
+        const effect: PvpAllPvpActionsType = {
+          actionType: pvpEffect.type === PvpActions.POISON ? PvpActions.POISON : 
+                     pvpEffect.type === PvpActions.SILENCE ? PvpActions.SILENCE :
+                     pvpEffect.type === PvpActions.DEAFEN ? PvpActions.DEAFEN :
+                     PvpActions.BLIND,
+          actionCategory: PvpActionCategories.STATUS_EFFECT,
+          parameters: {
+            target: agentId,
+            duration: 30 as const,
+            ...(pvpEffect.type === PvpActions.POISON ? {
+              find: pvpEffect.details?.find || '',
+              replace: pvpEffect.details?.replace || '',
+              case_sensitive: false
+            } : {})
+          }
+        };
+
+        await gmClient.applyPvPEffect(effect);
+        console.log('Applied PvP effect:', effect);
+      }
+
+    } catch (error) {
+      console.error(`Error processing turn for ${agent.character?.name}:`, error);
+      throw error;
     }
   }
 

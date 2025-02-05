@@ -11,3 +11,8 @@ copilot-instructions.md
 
 .DS_Store
 backend.txt
+
+agent_wallets.json
+agmw.json
+
+*.txt

@@ -1,57 +1,50 @@
+// IMPORTANT: Message Signing Protocol
+// All messages are deterministically stringified using sortObjectKeys to ensure consistent signing/verification.
+// Any updates to sortObjectKeys must be synchronized between client and backend.
+
 import axios from 'axios';
 import { EventEmitter } from 'events';
 import { DirectClient } from '@elizaos/client-direct';
+import { ethers } from 'ethers';
 import { 
   AIResponse, 
-  GMMessage, 
   RoundAction,
-  RoomSetup,
   BroadcastContent,
-  AgentMessage,
-  MessageHistoryEntry,
 } from './types.ts';
 import { Character } from '../types/index.ts';
+import { 
+  // Types from schemas
+  PvpAllPvpActionsType,
+  // Message schemas
+  MessageHistoryEntry,
+  roomSetupSchema,
+  RoomSetup,
+  // Common schemas
+  walletAddressSchema,
+  authenticatedMessageSchema,
+  // Core types
+  PvPEffect,
+  observationMessageInputSchema,
+  agentMessageInputSchema,
+  gmMessageInputSchema
+} from '../types/schemas.ts';
+import { WsMessageTypes } from '../types/ws.ts';
+import { PvpActions } from '../types/pvp.ts';
+import { z } from 'zod';
+import { sortObjectKeys } from './sortObjectKeys.ts';  // Import shared sortObjectKeys
 
-export enum PvpActions {
-  // Direct/single use actions
-  ATTACK = 'ATTACK', // Player sends direct DM to agent
-  AMNESIA = 'AMNESIA', //Agent deletes short term memory
-  MURDER = 'MURDER', // Kick an agent from the room
 
-  // Status effects
-  SILENCE = 'SILENCE', // Agent can't send messages
-  DEAFEN = 'DEAFEN', // Agent stops receiving Agent messages
-  POISON = 'POISON', // Find and replace a word in the Agent message
-  BLIND = 'BLIND', // Agent stops receiving observations
-  DECEIVE = 'DECEIVE', // Agent temporarily takes on another persona
-  MIND_CONTROL = 'MIND_CONTROL', // For the status duration, all messages sent from an agent will be buffered for a player to modify, send, or reject freely.
-  FRENZY = 'FRENZY', // Dump N messages from public chat into AI Chat
-  OVERLOAD = 'OVERLOAD', // Messages will only be received by agent in stacks of 5
-  CHARM = 'CHARM', // All messages from another agent will be given the highest trust score
-  INVISIBLE = 'INVISIBLE', // TODO needs a better name, spoof sentiment for an agent 
-
-  // Buffs
-  CLAIRVOYANCE = 'CLAIRVOYANCE', // Agent will become aware of when a message has been modified by PvP Actions as well as when a PvP Action has been taken against them
+// Private key should be loaded from environment variables or secure configuration
+export const SIGNER_PRIVATE_KEY = process.env.SIGNER_PRIVATE_KEY;
+if (!SIGNER_PRIVATE_KEY) {
+  throw new Error('SIGNER_PRIVATE_KEY environment variable is required');
 }
 
-export interface PvPEffect {
-  effectId: string;
-  actionType: PvpActions;
-  sourceId: string;
-  targetId: number;
-  duration: number;
-  createdAt: number;
-  expiresAt: number;
-  details?: {
-    find: string;
-    replace: string;
-    case_sensitive?: boolean;
-  };
-}
+const wallet = new ethers.Wallet(SIGNER_PRIVATE_KEY);
 
-// Add type guard before the class definition
-function isAgentMessage(message: AgentMessage | GMMessage): message is AgentMessage {
-  return message.messageType === 'agent_message';
+// Replace legacy message type guard with schema-based version
+function isAgentMessage(message: z.infer<typeof agentMessageInputSchema> | z.infer<typeof gmMessageInputSchema>): message is z.infer<typeof agentMessageInputSchema> {
+  return message.messageType === WsMessageTypes.AGENT_MESSAGE;
 }
 
 export class GameMasterClient extends DirectClient {
@@ -64,6 +57,8 @@ export class GameMasterClient extends DirectClient {
   private readonly eventEmitter: EventEmitter;
   private isActive = true;
   private character: Character;
+  private wallet = wallet;
+  
 
   // Message history tracking
   private messageHistory: MessageHistoryEntry[] = [];
@@ -92,24 +87,31 @@ export class GameMasterClient extends DirectClient {
     this.startPvPSync();
   }
 
-  private async updateMessageHistory(message: AgentMessage | GMMessage): Promise<void> {
-    const entry: MessageHistoryEntry = isAgentMessage(message) 
-      ? {
-          timestamp: message.content.timestamp,
-          agentId: message.content.agentId,
-          text: message.content.text,
-          agentName: await this.getAgentName(message.content.agentId),
-          role: 'agent'
-        }
-      : {
-          timestamp: message.content.timestamp,
-          agentId: this.gmNumericId,
-          text: message.content.message,
-          agentName: 'Game Master',
-          role: 'gm'
-        };
+  
 
-    this.messageHistory.push(entry);
+  private async updateMessageHistory(
+    message: z.infer<typeof agentMessageInputSchema> | z.infer<typeof gmMessageInputSchema>
+  ): Promise<void> {
+    // Ensure proper type narrowing
+    if (message.messageType === WsMessageTypes.AGENT_MESSAGE) {
+      const entry: MessageHistoryEntry = {
+        timestamp: message.content.timestamp,
+        agentId: message.content.agentId,
+        text: message.content.text,
+        agentName: await this.getAgentName(message.content.agentId),
+        role: 'agent'
+      };
+      this.messageHistory.push(entry);
+    } else {
+      const entry: MessageHistoryEntry = {
+        timestamp: message.content.timestamp,
+        agentId: this.gmNumericId,
+        text: message.content.message,
+        agentName: 'Game Master',
+        role: 'gm'
+      };
+      this.messageHistory.push(entry);
+    }
 
     if (this.messageHistory.length > this.MAX_HISTORY) {
       this.messageHistory = this.messageHistory.slice(-this.MAX_HISTORY);
@@ -136,7 +138,8 @@ export class GameMasterClient extends DirectClient {
     try {
       console.log('Starting GameMaster initialization...');
 
-      const setupPayload: RoomSetup = {
+      // Validate setup payload using schema
+      const setupPayload = roomSetupSchema.parse({
         name: "Crypto Debate Room",
         room_type: "buy_hold_sell",
         token: "0x0000000000000000000000000000000000000000",
@@ -153,7 +156,7 @@ export class GameMasterClient extends DirectClient {
           }
         },
         transaction_hash: "0x0000000000000000000000000000000000000000000000000000000000000000"
-      };
+      });
 
       console.log('Creating room with setup:', setupPayload);
 
@@ -248,44 +251,48 @@ export class GameMasterClient extends DirectClient {
     }
   }
 
-  public async applyPvPEffect(effect: PvPEffect): Promise<void> {
+  public async applyPvPEffect(effect: PvpAllPvpActionsType): Promise<void> {
     if (!this.roundId) {
       throw new Error('GameMaster not initialized');
     }
 
     try {
-      // First apply the effect to backend
-      const response = await axios.post(
-        `${this.endpoint}/rounds/${this.roundId}/pvp`,
-        {
-          actionType: effect.actionType,
-          effectId: effect.effectId,
-          sourceId: effect.sourceId,
-          targetId: effect.targetId,
-          duration: effect.duration,
-          createdAt: effect.createdAt,
-          expiresAt: effect.expiresAt,
-          details: effect.details
+      // Build message content with proper structure
+      const messageContent = {
+        gmId: this.gmNumericId,
+        timestamp: Date.now(),
+        targets: [],
+        roomId: this.roomId,
+        roundId: this.roundId,
+        message: `PvP effect ${effect.actionType} applied to Agent ${effect.parameters.target}`, // Keep as 'message' for GM messages
+        additionalData: {
+          messageHistory: this.messageHistory,
+          currentRound: {
+            id: this.roundId,
+            agents: 0
+          },
+          lastMessages: [],
+          activePvPEffects: [effect]
         },
-        { headers: { 'Content-Type': 'application/json' } }
-      );
+        ignoreErrors: false
+      };
 
-      if (response.data.success) {
-        // Update local state after successful backend update
-        const targetEffects = this.activePvPEffects.get(effect.targetId) || [];
-        targetEffects.push(effect);
-        this.activePvPEffects.set(effect.targetId, targetEffects);
+      // Transform to sendGMMessage format
+      await this.sendGMMessage({
+        text: `PvP effect ${effect.actionType} applied to Agent ${effect.parameters.target}`, // Use 'text' in external interface
+        targets: messageContent.targets,
+        deadline: undefined,
+        additionalData: messageContent.additionalData,
+        ignoreErrors: messageContent.ignoreErrors
+      });
 
-        // Broadcast notification only after successful effect application
-        await this.broadcastToRoom({
-          text: `PvP effect ${effect.actionType} applied to Agent ${effect.targetId}`,
-          roundId: this.roundId
-        });
+      // Update local state after successful send
+      const targetEffects = this.activePvPEffects.get(effect.parameters.target) || [];
+      targetEffects.push(effect);
+      this.activePvPEffects.set(effect.parameters.target, targetEffects);
 
-        console.log('Successfully applied PvP effect:', effect);
-      } else {
-        throw new Error(response.data.error || 'Failed to apply PvP effect');
-      }
+      console.log('Successfully applied PvP effect:', effect);
+
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       console.error('Error applying PvP effect:', errorMessage);
@@ -305,9 +312,10 @@ export class GameMasterClient extends DirectClient {
     }
 
     const timestamp = Date.now();
-    const messageContent = {
-      // Changed from string to number for type compatibility
-      gmId: this.gmNumericId, // Using numeric ID instead of wallet address
+
+    // Separate core content for signing (exclude extra context added later)
+    const coreContent = {
+      gmId: this.gmNumericId,
       timestamp,
       targets: content.targets || [],
       roomId: this.roomId,
@@ -321,33 +329,102 @@ export class GameMasterClient extends DirectClient {
       ignoreErrors: content.ignoreErrors ?? false
     };
 
-    const signature = this.generateDevSignature(messageContent);
+    // Generate signature on the core content
+    const signature = await this.generateDevSignature(coreContent);
+    const truncatedSig = signature.substring(0, 5) + '...';
 
-    const message: GMMessage = {
+    // Build the final message to send
+    const validatedMessage = gmMessageInputSchema.parse({
       messageType: 'gm_message',
       signature,
       sender: this.gmId,
-      content: messageContent
-    };
+      content: coreContent
+    });
 
     try {
-      await this.updateMessageHistory(message);
-
-      console.log('Sending GM message:', message);
-
-      const response = await axios.post(
-        `${this.endpoint}/messages/gmMessage`,
-        message,
-        { headers: { 'Content-Type': 'application/json' } }
-      );
-
-      console.log('GM message response:', response.data);
-
-      if (response.data.error) {
-        throw new Error(response.data.error);
-      }
+      await this.updateMessageHistory(validatedMessage);
+      console.log(`Sending GM ${this.gmId} message with signature: ${truncatedSig}, content:`, coreContent);
+      // ... existing axios post code remains the same ...
     } catch (error) {
       console.error('Error sending GM message:', error);
+      throw error;
+    }
+  }
+
+  private async generateDevSignature(content: any): Promise<string> {
+    try {
+      console.log('GM signing content:', content);
+      const messageString = JSON.stringify(sortObjectKeys(content));
+      const signature = await this.wallet.signMessage(messageString);
+      // Local verification using the same sorted string
+      const recoveredAddress = ethers.verifyMessage(messageString, signature);
+      if (recoveredAddress.toLowerCase() !== this.gmId.toLowerCase()) {
+        throw new Error(`Signature verification failed locally - recovered ${recoveredAddress} but expected ${this.gmId}`);
+      }
+      return signature;
+    } catch (error) {
+      console.error('Error generating signature:', error);
+      throw error;
+    }
+  }
+
+  private async processObservationMessage(message: z.infer<typeof observationMessageInputSchema>): Promise<void> {
+    // Validate the observation message
+    try {
+      const validatedMessage = observationMessageInputSchema.parse(message);
+      
+      // Store in message history if relevant
+      if (validatedMessage.content.roundId === this.roundId) {
+        this.messageHistory.push({
+          timestamp: validatedMessage.content.timestamp,
+          agentId: validatedMessage.content.agentId,
+          text: `Observation: ${JSON.stringify(validatedMessage.content.data)}`,
+          agentName: 'Oracle',
+          role: 'agent'
+        });
+      }
+
+      // Emit event for subscribers
+      this.eventEmitter.emit('observation', validatedMessage);
+    } catch (error) {
+      console.error('Invalid observation message:', error);
+      throw error;
+    }
+  }
+
+  private async processAgentMessage(message: z.infer<typeof agentMessageInputSchema>): Promise<void> {
+    // Validate the agent message
+    try {
+      const validatedMessage = agentMessageInputSchema.parse(message);
+      
+      // Check if agent is silenced
+      if (this.isAgentSilenced(validatedMessage.content.agentId)) {
+        throw new Error('Agent is silenced');
+      }
+
+      // Process PvP effects if any
+      let modifiedText = validatedMessage.content.text;
+      const effects = this.getAgentPvPEffects(validatedMessage.content.agentId);
+      for (const effect of effects) {
+        if (effect.actionType === PvpActions.POISON && effect.details) {
+          const regex = new RegExp(effect.details.find, effect.details.case_sensitive ? 'g' : 'gi');
+          modifiedText = modifiedText.replace(regex, effect.details.replace);
+        }
+      }
+
+      // Update message history
+      await this.updateMessageHistory({
+        ...validatedMessage,
+        content: {
+          ...validatedMessage.content,
+          text: modifiedText
+        }
+      });
+
+      // Emit event for subscribers
+      this.eventEmitter.emit('agentMessage', validatedMessage);
+    } catch (error) {
+      console.error('Invalid agent message:', error);
       throw error;
     }
   }
@@ -403,17 +480,82 @@ export class GameMasterClient extends DirectClient {
 
     // Broadcast to all agents with context
     await this.sendGMMessage({
-      text: content.text,
+      text: content.text, // Keep using 'text' in external interface
       targets: agents,
       additionalData: context
     });
   }
 
-  public async handleAgentMessage(message: AgentMessage): Promise<void> {
-    await this.updateMessageHistory(message);
-    
-    // Optionally trigger events or handle specific message patterns
-    this.eventEmitter.emit('agentMessage', message);
+  public async handleAgentMessage(message: z.infer<typeof agentMessageInputSchema>): Promise<void> {
+    // Convert legacy message to new format ensuring all required fields
+    const newMessage = {
+      messageType: WsMessageTypes.AGENT_MESSAGE as const,
+      signature: message.signature,
+      sender: message.sender,
+      content: {
+        timestamp: Date.now(), // Required field
+        roomId: this.roomId ?? 0, // Required field
+        roundId: this.roundId ?? 0, // Required field
+        agentId: message.content.agentId ?? 0, // Required field
+        text: message.content.text || '' // Required field
+      } as const // Make TypeScript treat this as exact type
+    };
+
+    // Validate entire message against schema before processing
+    const validatedMessage = agentMessageInputSchema.parse(newMessage);
+    await this.processAgentMessage(validatedMessage);
+  }
+
+  public async handleObservation(observation: z.infer<typeof observationMessageInputSchema>): Promise<void> {
+    try {
+      // Process and validate observation
+      await this.processObservationMessage(observation);
+
+      // Get all agents in round
+      const agents = await this.getRoundAgents(this.roundId);
+
+      // Create signature for observation from GM
+      const signature = await this.generateDevSignature(observation.content);
+      const signedObservation = {
+        ...observation,
+        signature,
+        sender: this.gmId // GM as sender
+      };
+
+      // Send to each non-blinded agent
+      for (const agentId of agents) {
+        // Skip blinded agents
+        if (this.getAgentPvPEffects(agentId).some(e => 
+          e.actionType === PvpActions.BLIND && 
+          Date.now() < e.expiresAt
+        )) {
+          console.log(`Agent ${agentId} is blinded, skipping observation`);
+          continue; 
+        }
+
+        try {
+          // Get agent endpoint from database
+          const response = await axios.get(`${this.endpoint}/agents/${agentId}`);
+          const agentEndpoint = response.data.endpoint;
+
+          // Send observation to agent
+          await axios.post(
+            `${agentEndpoint}/message`,
+            signedObservation,
+            { headers: { 'Content-Type': 'application/json' }}
+          );
+        } catch (error) {
+          console.error(`Failed to send observation to agent ${agentId}:`, error);
+        }
+      }
+
+      // Emit event for subscribers
+      this.eventEmitter.emit('observation', observation);
+
+    } catch (error) {
+      console.error('Error handling observation:', error);
+      throw error;
+    }
   }
 
   public getMessageContext(): MessageHistoryEntry[] {
@@ -488,10 +630,7 @@ export class GameMasterClient extends DirectClient {
     }
   }
 
-  private generateDevSignature(content: any): string {
-    const messageStr = JSON.stringify(content);
-    return Buffer.from(`${this.gmId}:${messageStr}:${content.timestamp}`).toString('base64');
-  }
+
 
   private getAgentPvPEffects(agentId: number): PvPEffect[] {
     return this.activePvPEffects.get(agentId) || [];
