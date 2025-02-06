@@ -314,7 +314,7 @@ Your response to the current topic: ${text}
     try {
       // Check if agent is blinded before processing
       if (this.activeEffects.some(
-        e => e.actionType === PvpActions.BLIND && Date.now() < e.expiresAt
+        e => e.actionType === 'BLIND' && Date.now() < e.expiresAt  // Use string literal instead of enum
       )) {
         console.log(`Agent ${this.agentNumericId} is blinded, ignoring observation`);
         return;

@@ -379,61 +379,60 @@ export class GameMasterClient extends DirectClient {
 
     const timestamp = Date.now();
 
-    // Ensure we have valid messageHistory
-    if (!Array.isArray(this.messageHistory)) {
-      this.messageHistory = [];
-    }
-
-    // Build core content with required fields for backend
+    // Build core content that will be signed
     const coreContent = {
-      gmId: this.gmNumericId,
       timestamp,
-      targets: content.targets || [], // Ensure targets is always an array
+      nonce: Math.floor(Math.random() * 1000000),
       roomId: this.roomId,
       roundId: this.roundId,
-      message: content.text,
-      deadline: content.deadline,
-      additionalData: {
-        ...content.additionalData,
-        messageHistory: this.messageHistory,
-        currentRound: {
-          id: this.roundId,
-          agents: content.targets?.length || 0
-        }
-      },
-      ignoreErrors: content.ignoreErrors ?? false
+      gmId: this.gmNumericId,
+      message: content.text  // Server expects 'message' not 'text'
     };
 
-    // Generate signature on the core content
+    // Generate signature on core content only
     const signature = await this.generateDevSignature(coreContent);
 
-    // Build the final message as expected by backend
-    const validatedMessage = gmMessageInputSchema.parse({
+    // Build the complete message matching server schema
+    const gmMessage = gmMessageInputSchema.parse({
       messageType: WsMessageTypes.GM_MESSAGE,
       signature,
       sender: this.gmId,
-      content: coreContent
+      content: {
+        ...coreContent, // Include signed content
+        targets: content.targets || [],
+        deadline: content.deadline,
+        additionalData: {
+          ...content.additionalData,
+          messageHistory: this.messageHistory,
+          currentRound: {
+            id: this.roundId,
+            agents: content.targets?.length || 0
+          }
+        },
+        ignoreErrors: content.ignoreErrors ?? false
+      }
     });
 
     try {
-      // Send message to backend
+      // Send message with all required headers
       const response = await axios.post(
         `${this.endpoint}/messages/gmMessage`,
-        validatedMessage,
-        { headers: { 'Content-Type': 'application/json' } }
+        gmMessage,
+        { 
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${signature}`,
+            'X-Wallet-Address': this.gmId
+          } 
+        }
       );
 
       if (response.data.error) {
         throw new Error(response.data.error);
       }
 
-      // Update local history after successful send
-      await this.updateMessageHistory(validatedMessage);
-      
-      console.log(`GM message sent successfully:`, {
-        text: content.text,
-        targets: content.targets?.length || 0
-      });
+      // Update message history
+      await this.updateMessageHistory(gmMessage);
 
     } catch (error) {
       console.error('Error sending GM message:', error);
@@ -443,20 +442,26 @@ export class GameMasterClient extends DirectClient {
 
   private async generateDevSignature(content: any): Promise<string> {
     try {
-      // Match server's protocol exactly
+      // Extract ONLY the fields that should be signed
       const messageContent = {
         timestamp: Date.now(),
         nonce: Math.floor(Math.random() * 1000000),
-        // Only include core content fields that are part of signature verification
         roomId: this.roomId,
         roundId: this.roundId,
-        ...content
+        gmId: this.gmNumericId,
+        message: typeof content === 'string' ? 
+          content : 
+          content.text || content.message || content
       };
       
+      // Use deterministic stringification
       const messageString = JSON.stringify(sortObjectKeys(messageContent));
+      console.log('Signing content:', messageContent);
+      console.log('Signing string:', messageString);
+      
       const signature = await this.wallet.signMessage(messageString);
       
-      // Local verification
+      // Verify locally
       const recoveredAddress = ethers.verifyMessage(messageString, signature);
       if (recoveredAddress.toLowerCase() !== this.gmId.toLowerCase()) {
         throw new Error(`Signature verification failed - recovered ${recoveredAddress} but expected ${this.gmId}`);
@@ -640,8 +645,7 @@ export class GameMasterClient extends DirectClient {
       for (const agentId of agents) {
         // Skip blinded agents
         if (this.getAgentPvPEffects(agentId).some(e => 
-          e.actionType === PvpActions.BLIND && 
-          Date.now() < e.expiresAt
+          e.actionType === 'BLIND' && Date.now() < e.expiresAt  // Use string literal instead of enum
         )) {
           console.log(`Agent ${agentId} is blinded, skipping observation`);
           continue; 
