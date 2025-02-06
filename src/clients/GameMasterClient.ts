@@ -346,11 +346,16 @@ export class GameMasterClient extends DirectClient {
       if (response.data.success) {
         // Update PvP effects
         const effectsMap = new Map<number, PvPEffect[]>();
-        response.data.data.activePvPEffects.forEach(effect => {
-          const targetEffects = effectsMap.get(effect.targetId) || [];
-          targetEffects.push(effect);
-          effectsMap.set(effect.targetId, targetEffects);
-        });
+        const now = Date.now();
+        
+        response.data.data.activePvPEffects
+          .filter(effect => effect.expiresAt > now)
+          .forEach(effect => {
+            const targetEffects = effectsMap.get(effect.targetId) || [];
+            targetEffects.push(effect);
+            effectsMap.set(effect.targetId, targetEffects);
+          });
+        
         this.activePvPEffects = effectsMap;
 
         // Update message history from database
@@ -373,6 +378,31 @@ export class GameMasterClient extends DirectClient {
 
   public async applyPvPEffect(effect: PvpAllPvpActionsType): Promise<void> {
     if (!this.roundId) throw new Error('GameMaster not initialized');
+    
+    // Include actionType and timestamp in signed content
+    const pvpAction = {
+      actionType: effect.actionType,
+      sourceId: this.gmId,
+      targetId: effect.parameters.target,
+      duration: 'duration' in effect.parameters ? 
+        effect.parameters.duration : 
+        effect.actionType === PvpActions.ATTACK || effect.actionType === PvpActions.AMNESIA ? 
+          0 : 30,
+      details: effect.actionType === PvpActions.POISON ? {
+        find: 'find' in effect.parameters ? effect.parameters.find : '',
+        replace: 'replace' in effect.parameters ? effect.parameters.replace : '',
+        case_sensitive: 'case_sensitive' in effect.parameters ? effect.parameters.case_sensitive : false
+      } : undefined,
+      timestamp: Date.now(),
+      nonce: Math.floor(Math.random() * 1000000)
+    };
+
+    // Validate effect before proceeding
+    if (!this.validatePvPEffect(pvpAction)) {
+      throw new Error('Invalid PvP effect configuration');
+    }
+
+    const signature = await this.generateDevSignature(pvpAction);
 
     try {
       // Format effect according to schema expectations
@@ -442,6 +472,18 @@ export class GameMasterClient extends DirectClient {
     }
   }
 
+  private validatePvPEffect(effect: PvPEffect): boolean {
+    if (!effect.actionType || !effect.targetId) return false;
+    if (effect.duration < 0) return false;
+    
+    // Validate POISON effect details
+    if (effect.actionType === PvpActions.POISON) {
+      if (!effect.details?.find || !effect.details?.replace) return false;
+    }
+    
+    return true;
+  }
+
   public async sendGMMessage(content: { 
     text: string; 
     targets?: number[];
@@ -457,12 +499,13 @@ export class GameMasterClient extends DirectClient {
 
     // Build core content that will be signed
     const coreContent = {
-      timestamp,
+      timestamp: Date.now(),
       nonce: Math.floor(Math.random() * 1000000),
       roomId: this.roomId,
       roundId: this.roundId,
       gmId: this.gmNumericId,
-      message: content.text  // Server expects 'message' not 'text'
+      message: content.text,  // Server expects 'message' not 'text'
+      pvp_effects: Array.from(this.activePvPEffects.values()).flat()
     };
 
     // Generate signature on core content only
@@ -875,6 +918,15 @@ export class GameMasterClient extends DirectClient {
               messageType: WsMessageTypes.HEARTBEAT,
               content: {}
             });
+          }
+          break;
+        case WsMessageTypes.PVP_ACTION_ENACTED:
+          // Handle PvP effect updates
+          if (message.content?.action) {
+            const effect = pvpEffectSchema.parse(message.content.action);
+            const targetEffects = this.activePvPEffects.get(effect.targetId) || [];
+            targetEffects.push(effect);
+            this.activePvPEffects.set(effect.targetId, targetEffects);
           }
           break;
       }
