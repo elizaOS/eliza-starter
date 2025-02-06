@@ -85,27 +85,23 @@ export class SharedWebSocket {
     if (!this.ws || !this.config.roomId) return false;
 
     return new Promise((resolve, reject) => {
+      let verified = false;
+      
+      // Increase timeout to 30 seconds for more reliable verification
       const timeout = setTimeout(() => {
-        reject(new Error('Connection verification timeout'));
-      }, 10000);
-
-      const checkConnection = () => {
-        if (this.ws?.readyState === WebSocket.OPEN) {
-          this.ws.send(JSON.stringify({
-            messageType: WsMessageTypes.PARTICIPANTS,
-            content: {
-              roomId: this.config.roomId,
-              timestamp: Date.now()
-            }
-          }));
+        if (!verified) {
+          reject(new Error('Connection verification timeout'));
         }
-      };
+      }, 30000);
 
       const handleMessage = (data: WebSocket.Data) => {
         try {
           const message = JSON.parse(data.toString());
-          if (message.messageType === WsMessageTypes.SYSTEM_NOTIFICATION &&
-              message.content.text === 'Subscribed to room') {
+          // Check for both types of confirmation messages
+          if ((message.messageType === WsMessageTypes.SYSTEM_NOTIFICATION &&
+               message.content.text === 'Subscribed to room') ||
+              (message.messageType === WsMessageTypes.PARTICIPANTS)) {
+            verified = true;
             clearTimeout(timeout);
             this.ws?.removeListener('message', handleMessage);
             resolve(true);
@@ -116,17 +112,24 @@ export class SharedWebSocket {
       };
 
       this.ws.on('message', handleMessage);
-      checkConnection();
 
-      const interval = setInterval(checkConnection, 1000);
-      setTimeout(() => clearInterval(interval), 10000);
+      // Send both subscription and participants request
+      this.subscribeToRoom().catch(reject);
+      if (this.ws.readyState === WebSocket.OPEN) {
+        this.ws.send(JSON.stringify({
+          messageType: WsMessageTypes.PARTICIPANTS,
+          content: {
+            roomId: this.config.roomId,
+            timestamp: Date.now()
+          }
+        }));
+      }
     });
   }
 
   private async subscribeToRoom(): Promise<void> {
     if (!this.ws) return;
 
-    // Match server's expected schema
     const subscribeMessage = {
       messageType: WsMessageTypes.SUBSCRIBE_ROOM,
       content: {
@@ -137,11 +140,16 @@ export class SharedWebSocket {
       }
     };
 
-    if (this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(sortObjectKeys(subscribeMessage)));
-    } else {
-      throw new Error('WebSocket not connected when trying to subscribe');
-    }
+    return new Promise((resolve, reject) => {
+      if (this.ws?.readyState === WebSocket.OPEN) {
+        this.ws.send(JSON.stringify(subscribeMessage), (error) => {
+          if (error) reject(error);
+          else resolve();
+        });
+      } else {
+        reject(new Error('WebSocket not connected when trying to subscribe'));
+      }
+    });
   }
 
   private setupHeartbeat(): void {

@@ -64,6 +64,24 @@ interface ServerPvPAction {
   };
 }
 
+interface GMMessagePayload {
+  messageType: 'gm_message';
+  signature: string;
+  sender: string;
+  content: {
+    gmId: number;
+    timestamp: number;
+    roomId: number;
+    roundId: number;
+    message: string;
+    targets: number[];
+    additionalData: {
+      pvpEffects: PvPEffect[];
+      messageHistory: MessageHistoryEntry[];
+    };
+  };
+}
+
 /**
  * GameMasterClient orchestrates room/round management and PvP interactions
  * 

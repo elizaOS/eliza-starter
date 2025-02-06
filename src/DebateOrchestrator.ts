@@ -98,22 +98,7 @@ class DebateOrchestrator {
         throw new Error('GameMaster not found!');
       }
 
-      // Initialize GM and setup
-      const gmClient = this.gameMaster.clients?.pvpvai;
-      if (!gmClient) throw new Error('GM client not initialized');
-
-      await gmClient.initialize();
-
-      // Get and verify room/round IDs
-      const settings = (this.gameMaster.character as any).settings?.pvpvai;
-      this.roomId = settings?.roomId;
-      this.roundId = settings?.roundId;
-
-      if (!this.roomId || !this.roundId) {
-        throw new Error('Room/Round initialization failed - missing IDs');
-      }
-
-      // Initialize agents
+      // Initialize agents (which now handles GM initialization first)
       await this.initializeAgents();
 
       // Start discussion phase
@@ -142,6 +127,7 @@ class DebateOrchestrator {
       const gmClient = this.gameMaster.clients.pvpvai;
       console.log('Initializing GM and waiting for connection...');
       
+      // Single GM initialization
       await gmClient.initialize();
       
       // Add delay to ensure GM WebSocket fully connects
@@ -152,6 +138,7 @@ class DebateOrchestrator {
       this.roomId = settings?.roomId;
       this.roundId = settings?.roundId;
 
+      // Store the IDs immediately after first initialization
       if (!this.roomId || !this.roundId) {
         throw new Error('Room/Round initialization failed - missing IDs');
       }
