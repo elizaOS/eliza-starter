@@ -12,7 +12,26 @@ import { PvPEffect } from '../types/schemas.ts';
 import { PvpActions } from '../types/pvp.ts';
 import { ethers } from 'ethers';
 import { sortObjectKeys } from './sortObjectKeys.ts';  // Imported shared sortObjectKeys
+import WebSocket from 'ws'; // Import WebSocket
+import { SharedWebSocket, WebSocketConfig } from './shared-websocket.ts';
 
+/**
+ * AgentClient handles individual agent interactions with the PvPvAI system
+ * 
+ * Key responsibilities:
+ * - Maintains WebSocket connection to server
+ * - Handles message signing and verification
+ * - Processes PvP effects received from GM
+ * - Manages message queue with retries
+ * - Maintains message history context
+ * 
+ * Communication channels:
+ * - WebSocket for real-time updates
+ * - REST API for message sending
+ * 
+ * @class AgentClient
+ * @extends DirectClient
+ */
 
 export class AgentClient extends DirectClient {
   private readonly walletAddress: string;
@@ -33,8 +52,16 @@ export class AgentClient extends DirectClient {
   private messageContext: MessageHistoryEntry[] = [];
   private readonly MAX_CONTEXT_SIZE = 8;
   private readonly wallet: ethers.Wallet;  // Use the existing wallet property
+  private wsClient: SharedWebSocket;
 
-
+  /**
+   * Initializes a new agent client instance
+   * 
+   * @param endpoint - Server endpoint URL
+   * @param walletAddress - Agent's Ethereum wallet address
+   * @param creatorId - Creator's unique identifier
+   * @param agentNumericId - Agent's numeric database ID
+   */
   constructor(
     endpoint: string,
     walletAddress: string,
@@ -67,12 +94,34 @@ export class AgentClient extends DirectClient {
       creatorId,
       agentNumericId
     });
+
+    // Initialize wsClient in setRoomAndRound instead
+    this.wsClient = null;
   }
 
   public setRoomAndRound(roomId: number, roundId: number): void {
     console.log(`Setting room ${roomId} and round ${roundId}`);
     this.roomId = roomId;
     this.roundId = roundId;
+
+    // Configure WebSocket
+    const wsConfig: WebSocketConfig = {
+      endpoint: this.endpoint,
+      roomId: this.roomId,
+      auth: {
+        walletAddress: this.walletAddress,
+        agentId: this.agentNumericId,
+      },
+      handlers: {
+        onMessage: this.handleWebSocketMessage.bind(this),
+        onError: (error) => console.error(`Agent ${this.agentNumericId} WebSocket error:`, error),
+        onClose: () => console.log(`Agent ${this.agentNumericId} WebSocket connection closed`)
+      }
+    };
+
+    // Create and connect WebSocket
+    this.wsClient = new SharedWebSocket(wsConfig);
+    this.wsClient.connect().catch(console.error);
   }
 
   public async handleGMMessage(message: z.infer<typeof gmMessageInputSchema>): Promise<void> {
@@ -295,6 +344,9 @@ Your response to the current topic: ${text}
   }
 
   public override stop(): void {
+    if (this.wsClient) {
+      this.wsClient.close();
+    }
     this.isActive = false;
     this.messageContext = [];
     super.stop();
@@ -337,6 +389,41 @@ Your response to the current topic: ${text}
     } catch (error) {
       console.error('Error handling observation:', error);
       throw error;
+    }
+  }
+
+  private handleWebSocketMessage(data: WebSocket.Data): void {
+    try {
+      const message = JSON.parse(data.toString());
+      
+      switch (message.messageType) {
+        case WsMessageTypes.SYSTEM_NOTIFICATION:
+          console.log(`Agent ${this.agentNumericId} notification:`, message.content.text);
+          break;
+          
+        case WsMessageTypes.HEARTBEAT:
+          if (this.wsClient.isConnected()) {
+            this.wsClient.send({
+              messageType: WsMessageTypes.HEARTBEAT,
+              content: {}
+            });
+          }
+          break;
+
+        case WsMessageTypes.GM_MESSAGE:
+          this.handleGMMessage(message).catch(err => 
+            console.error('Error handling GM message:', err)
+          );
+          break;
+
+        case WsMessageTypes.OBSERVATION:
+          this.handleObservation(message).catch(err => 
+            console.error('Error handling observation:', err)
+          );
+          break;
+      }
+    } catch (error) {
+      console.error('Error handling WebSocket message:', error);
     }
   }
 }

@@ -6,6 +6,7 @@ import axios from 'axios';
 import { EventEmitter } from 'events';
 import { DirectClient } from '@elizaos/client-direct';
 import { ethers } from 'ethers';
+import WebSocket from 'ws';
 import { 
   AIResponse, 
   RoundAction,
@@ -35,7 +36,7 @@ import { WsMessageTypes } from '../types/ws.ts';
 import { PvpActions } from '../types/pvp.ts';
 import { z } from 'zod';
 import { sortObjectKeys } from './sortObjectKeys.ts';  // Import shared sortObjectKeys
-
+import { SharedWebSocket, WebSocketConfig } from './shared-websocket.ts';
 
 // Private key should be loaded from environment variables or secure configuration
 export const SIGNER_PRIVATE_KEY = process.env.SIGNER_PRIVATE_KEY;
@@ -63,6 +64,26 @@ interface ServerPvPAction {
   };
 }
 
+/**
+ * GameMasterClient orchestrates room/round management and PvP interactions
+ * 
+ * Core responsibilities:
+ * - Room/round initialization and lifecycle management
+ * - PvP effect application and tracking
+ * - Message validation and signing
+ * - WebSocket connection management
+ * - Message history maintenance
+ * 
+ * Flow:
+ * 1. Initialize room/round
+ * 2. Setup WebSocket connection
+ * 3. Process and relay agent messages
+ * 4. Apply/track PvP effects
+ * 5. Maintain message history
+ * 
+ * @class GameMasterClient
+ * @extends DirectClient 
+ */
 export class GameMasterClient extends DirectClient {
   private readonly gmId: string;                  // Wallet address
   private readonly gmNumericId: number = 51;      // Database ID
@@ -74,7 +95,10 @@ export class GameMasterClient extends DirectClient {
   private isActive = true;
   private character: Character;
   private wallet = wallet;
-  
+  private wsClient: SharedWebSocket;
+  private heartbeatInterval: NodeJS.Timeout | null = null;
+  private readonly HEARTBEAT_INTERVAL = 30000; // 30 seconds
+  private reconnectAttempts: number = 0;
 
   // Message history tracking
   private messageHistory: MessageHistoryEntry[] = [];
@@ -85,6 +109,14 @@ export class GameMasterClient extends DirectClient {
   private activePvPEffects: Map<number, PvPEffect[]> = new Map();
   private readonly PVP_SYNC_INTERVAL = 5000; // 5 seconds
 
+  /**
+   * Initializes game master client instance
+   * 
+   * @param endpoint - Server endpoint URL
+   * @param gmId - Game master's Ethereum wallet address  
+   * @param creatorId - Creator's unique identifier
+   * @param character - Game master's character configuration
+   */
   constructor(endpoint: string, gmId: string, creatorId: number, character: Character) {
     super();
     this.endpoint = endpoint;
@@ -150,6 +182,13 @@ export class GameMasterClient extends DirectClient {
     }
   }
 
+  /**
+   * Initializes room and round for debate
+   * Handles both new room creation and existing room connection
+   * 
+   * @returns Promise resolving when initialization complete
+   * @throws Error if initialization fails
+   */
   public async initialize(): Promise<void> {
     try {
       console.log('Starting GameMaster initialization...');
@@ -244,6 +283,25 @@ export class GameMasterClient extends DirectClient {
         isNewRoom: !roomResponse.data?.existing,
         isNewRound: !roundResponse.data?.existing
       });
+
+      // Configure WebSocket
+      const wsConfig: WebSocketConfig = {
+        endpoint: this.endpoint,
+        roomId: this.roomId,
+        auth: {
+          walletAddress: this.gmId,
+          agentId: this.gmNumericId,
+        },
+        handlers: {
+          onMessage: this.handleWebSocketMessage.bind(this),
+          onError: (error) => console.error('GM WebSocket error:', error),
+          onClose: () => console.log('GM WebSocket connection closed')
+        }
+      };
+
+      // Create and connect WebSocket
+      this.wsClient = new SharedWebSocket(wsConfig);
+      await this.wsClient.connect();
 
     } catch (error) {
       console.error('GameMaster initialization failed:', error);
@@ -775,10 +833,35 @@ export class GameMasterClient extends DirectClient {
   }
 
   public override stop(): void {
+    if (this.wsClient) {
+      this.wsClient.close();
+    }
     this.isActive = false;
     this.messageHistory = [];
     this.agentNameMap.clear();
     this.activePvPEffects.clear();
     super.stop();
+  }
+
+  private handleWebSocketMessage(data: WebSocket.Data): void {
+    try {
+      const message = JSON.parse(data.toString());
+      
+      switch (message.messageType) {
+        case WsMessageTypes.SYSTEM_NOTIFICATION:
+          console.log('System notification:', message.content.text);
+          break;
+        case WsMessageTypes.HEARTBEAT:
+          if (this.wsClient.isConnected()) {
+            this.wsClient.send({
+              messageType: WsMessageTypes.HEARTBEAT,
+              content: {}
+            });
+          }
+          break;
+      }
+    } catch (error) {
+      console.error('Error handling WebSocket message:', error);
+    }
   }
 }
