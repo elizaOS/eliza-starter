@@ -1,6 +1,6 @@
 // IMPORTANT: Message Signing Protocol
 // All messages are deterministically stringified using sortObjectKeys to ensure consistent signing/verification.
-// Any updates to sortObjectKeys must be synchronized between client and backend.
+// Any updates to sortObjectKeys must be synchronized between client and backend. Websocket incoming.
 
 import axios from 'axios';
 import { EventEmitter } from 'events';
