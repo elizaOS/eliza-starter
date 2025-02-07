@@ -28,6 +28,7 @@ class DebateOrchestrator {
   constructor(runtimes: ExtendedAgentRuntime[]) {
     this.currentTopicId = stringToUuid('debate-topic') as UUID;
     
+    // Separate GM from regular agents
     runtimes.forEach(runtime => {
       const character = runtime.character as any;
       if (character.agentRole?.type === 'GM') {
@@ -43,38 +44,55 @@ class DebateOrchestrator {
     });
   }
 
-  // Added new method to register agents
-  private async registerAgents(): Promise<void> {
-    for (const agent of this.agents) {
-      await agent.clients?.pvpvai?.getClient().setRoomAndRound(this.roomId, this.roundId);
+  public async initialize(roomId: number): Promise<void> {
+    if (!this.gameMaster) {
+      throw new Error('GameMaster not found!');
     }
-    console.log('Agents registered, waiting for confirmation...');
-    await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds for registration to complete
+
+    this.roomId = roomId;
+
+    const gmClient = this.gameMaster.clients?.pvpvai?.getClient() as GameMasterClient;
+    if (!gmClient) {
+      throw new Error('GM client not initialized');
+    }
+
+    // Initialize GM first
+    await gmClient.setRoomAndRound(roomId);
+
+    // Initialize other agents
+    for (const agent of this.agents) {
+      const agentClient = agent.clients?.pvpvai?.getClient();
+      if (!agentClient) {
+        throw new Error(`Agent client not initialized for ${agent.character.name}`);
+      }
+      await agentClient.setRoomAndRound(roomId);
+    }
+
+    // Wait for all connections to be established
+    await this.verifyConnections();
   }
 
   public async startDebate() {
     try {
+      if (!this.roomId || !this.roundId) {
+        throw new Error('Must call initialize() with room and round IDs first');
+      }
+
       this.isDebating = true;
       this.state.phase = 'init';
 
-      if (!this.gameMaster) {
-        throw new Error('GameMaster not found!');
-      }
-
-      const gmClient = this.gameMaster.clients?.pvpvai?.getClient() as GameMasterClient;
+      const gmClient = this.gameMaster?.clients?.pvpvai?.getClient() as GameMasterClient;
       if (!gmClient) {
         throw new Error('GM client not initialized');
       }
 
-      // Register agents first
-      await this.registerAgents();
-      
-      // Wait for connections to establish
-      await this.verifyConnections();
-
       // Start debate session
       await gmClient.sendGMMessage("Room initialized. Beginning debate round.", []);
       await gmClient.sendGMMessage("Beginning discussion phase. Agents may now engage in debate.", []);
+      
+      const topic = "Let's discuss the future of cryptocurrency. What are your thoughts on Bitcoin versus Ethereum?";
+      const validAgentIds = this.agents.map(a => a.character.settings?.pvpvai?.agentId).filter(Boolean);
+      await gmClient.sendGMMessage(topic, validAgentIds);
       
       this.state.phase = 'discussion';
 
@@ -85,24 +103,20 @@ class DebateOrchestrator {
   }
 
   private async verifyConnections(): Promise<void> {
-    const gmClient = this.gameMaster?.clients?.pvpvai?.getClient();
-    if (!gmClient?.wsClient) {
-      throw new Error('GM client not initialized');
-    }
-
-    // Wait for WebSocket to connect
     const maxRetries = 10;
     const retryDelay = 2000;
     let retries = 0;
 
     while (retries < maxRetries) {
-      console.log('Checking WebSocket connection...', {
-        isConnected: gmClient.wsClient.isConnected(),
-        retry: retries + 1
-      });
+      const allConnected = [
+        this.gameMaster?.clients?.pvpvai?.getClient()?.wsClient?.isConnected(),
+        ...this.agents.map(agent => 
+          agent.clients?.pvpvai?.getClient()?.wsClient?.isConnected()
+        )
+      ].every(Boolean);
 
-      if (gmClient.wsClient.isConnected()) {
-        console.log('WebSocket connected successfully');
+      if (allConnected) {
+        console.log('All agents connected successfully');
         return;
       }
 
@@ -110,7 +124,7 @@ class DebateOrchestrator {
       retries++;
     }
 
-    throw new Error('Failed to establish WebSocket connection');
+    throw new Error('Failed to establish connections for all agents');
   }
 
   public stopDebate() {

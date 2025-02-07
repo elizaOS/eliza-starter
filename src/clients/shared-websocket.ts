@@ -2,12 +2,15 @@ import WebSocket from 'ws';
 import { WsMessageTypes } from '../types/ws.ts';
 import { sortObjectKeys } from './sortObjectKeys.ts'; 
 
+// Update auth interface to match backend expectations
 export interface WebSocketConfig {
   endpoint: string;
   roomId: number;
   auth: {
     walletAddress: string;
     agentId: number;
+    timestamp?: number;
+    signature?: string;
   };
   handlers: {
     onMessage: (data: WebSocket.Data) => void;
@@ -39,11 +42,18 @@ export class SharedWebSocket {
     wsUrl.protocol = wsUrl.protocol.replace('http', 'ws');
     wsUrl.pathname = '/ws';
 
-    this.ws = new WebSocket(wsUrl.toString(), {
-      headers: {
-        'Authorization': `Bearer ${this.config.auth.walletAddress}`,
-      }
+    // Add auth params to query string
+    const params = new URLSearchParams({
+      walletAddress: this.config.auth.walletAddress,
+      agentId: this.config.auth.agentId.toString(),
+      timestamp: (this.config.auth.timestamp || Date.now()).toString()
     });
+    if (this.config.auth.signature) {
+      params.append('signature', this.config.auth.signature);
+    }
+    wsUrl.search = params.toString();
+
+    this.ws = new WebSocket(wsUrl.toString());
 
     return new Promise((resolve, reject) => {
       if (!this.ws) return reject('WebSocket not initialized');
@@ -82,10 +92,10 @@ export class SharedWebSocket {
 
     const subscribeMessage = {
       messageType: WsMessageTypes.SUBSCRIBE_ROOM,
-      content: {
+      content: sortObjectKeys({
         roomId: this.config.roomId,
         timestamp: Date.now()
-      }
+      })
     };
 
     if (this.ws.readyState === WebSocket.OPEN) {

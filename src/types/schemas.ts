@@ -2,6 +2,21 @@ import { z } from 'zod';
 import { PvpActionCategories, PvpActions } from '../types/pvp.ts';
 import { WsMessageTypes } from '../types/ws.ts';
 
+export const baseMessageSchema = z.object({
+  messageType: z.nativeEnum(WsMessageTypes),
+  timestamp: z.number(),
+  signature: z.string(),
+  sender: z.string(),
+  content: z.any()
+});
+
+export const gmMessageSchema = baseMessageSchema.extend({
+  content: z.object({
+    text: z.string(),
+    targets: z.array(z.number())
+  })
+});
+
 /*
   SUBSCRIBE ROOM MESSAGES SCHEMA:
   Sent by:
@@ -375,7 +390,7 @@ export type AllAiChatMessageSchemaTypes =
   | z.infer<typeof gmMessageAiChatOutputSchema>
   | z.infer<typeof pvpActionEnactedAiChatOutputSchema>;
 // Common schemas
-export const walletAddressSchema = z.string().regex(/^0x[a-fA-F0-9]{40}$/);
+export const validEthereumAddressSchema = z.string().regex(/^0x[a-fA-F0-9]{40}$/);
 export const signatureSchema = z.string();
 export const timestampSchema = z.number().int().positive();
 
@@ -389,35 +404,54 @@ export const roomConfigSchema = z.object({
 });
 
 export const agentConfigSchema = z.object({
-  wallet: walletAddressSchema,
+  // wallet: walletAddressSchema,
   webhook: z.string().url(),
+
 });
 
+export const roomSetupContentSchema = z.object({
+    timestamp: z.number(),
+    name: z.string().min(1),
+    room_type: z.string(),
+    color: z
+      .string()
+      .optional()
+      .default('#' + Math.floor(Math.random() * 16777215).toString(16)),
+    image_url: z.string().url().optional().default('https://avatar.iran.liara.run/public'), 
+    token: validEthereumAddressSchema,
+    token_webhook: z.string().url(),
+    agents: z.array(z.number()),
+    // agents: z.record(z.string(), agentConfigSchema),
+    gm: z.number(),
+    chain_id: z.number(),
+    chain_family: z.string(),
+    room_config: roomConfigSchema,
+    transaction_hash: z
+      .string()
+      .regex(/^0x[a-fA-F0-9]{64}$/)
+      .optional(),
+  })
+
 export const roomSetupSchema = z.object({
-  name: z.string().min(1),
-  room_type: z.string(),
-  color: z.string().optional(),
-  image_url: z.string().url().optional(),
-  token: walletAddressSchema,
-  token_webhook: z.string().url(),
-  agents: z.record(z.string(), agentConfigSchema),
-  gm: walletAddressSchema,
-  chain_id: z.string(),
-  chain_family: z.string(),
-  room_config: roomConfigSchema,
-  transaction_hash: z.string().regex(/^0x[a-fA-F0-9]{64}$/),
+  messageType: z.literal(WsMessageTypes.CREATE_ROOM),
+  sender: validEthereumAddressSchema,
+  signature: signatureSchema,
+  content: roomSetupContentSchema,
 });
 
 export const agentAddSchema = z.object({
   agent_id: z.number().int().positive(),
-  wallet_address: z.string()
+  wallet_address: z.string(),
+  wallet_json: z.any(),
 });
 
 export const agentBulkAddSchema = z.object({
-  agents: z.array(z.object({
-    id: z.number().int().positive(),
-    walletAddress: z.string()
-  }))
+  agents: z.array(
+    z.object({
+      id: z.number().int().positive(),
+      walletAddress: z.string(),
+    })
+  ),
 });
 
 // Round related schemas
@@ -469,7 +503,6 @@ export const kickParticipantSchema = z.object({
 });
 
 // Export types generated from schemas
-export type RoomSetup = z.infer<typeof roomSetupSchema>;
 export type RoomAgentAdd = z.infer<typeof agentAddSchema>;
 export type RoomAgentBulkAdd = z.infer<typeof agentBulkAddSchema>;
 export type RoundMessage = z.infer<typeof roundMessageInputSchema>;

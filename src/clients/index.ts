@@ -4,9 +4,7 @@ import { TelegramClientInterface } from "@elizaos/client-telegram";
 import { TwitterClientInterface } from "@elizaos/client-twitter";
 import { IAgentRuntime } from "@elizaos/core";
 import { Character } from "../types/index.ts";
-import { createPVPVAIClient } from "./PVPVAIIntegration.ts";
-import { AgentRuntime } from "@elizaos/core";
-import { AgentConfig, GameMasterConfig } from "./types.ts";
+
 
 /**
  * Initializes all configured clients for an agent runtime

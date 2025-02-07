@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { DirectClient } from '@elizaos/client-direct';
-import { ethers } from 'ethers';
+import { Wallet } from 'ethers';
 import WebSocket from 'ws';
 import { Character } from '../types/index.ts';
 import { gmMessageInputSchema } from '../types/schemas.ts';
@@ -9,7 +9,7 @@ import { sortObjectKeys } from './sortObjectKeys.ts';
 import { SharedWebSocket, WebSocketConfig } from './shared-websocket.ts';
 
 export class GameMasterClient extends DirectClient { 
-  private readonly wallet: ethers.Wallet;
+  private readonly wallet: Wallet;
   private readonly gmId: string;                 
   private readonly gmNumericId: number; 
   private roomId: number;
@@ -36,7 +36,7 @@ export class GameMasterClient extends DirectClient {
       throw new Error('GM_PRIVATE_KEY environment variable is required');
     }
     
-    this.wallet = new ethers.Wallet(privateKey);
+    this.wallet = new Wallet(privateKey);
     if (this.wallet.address.toLowerCase() !== this.gmId.toLowerCase()) {
       throw new Error(`GameMaster wallet address mismatch: ${this.wallet.address} != ${this.gmId}`);
     }
@@ -66,145 +66,107 @@ export class GameMasterClient extends DirectClient {
     return await this.wallet.signMessage(messageString);
   }
 
-  public async setRoomAndRound(roomId: number, roundId: number): Promise<void> {
-    console.log(`Setting room ${roomId} and round ${roundId} for GM`);
+  public async setRoomAndRound(roomId: number): Promise<void> {
+    console.log(`Connecting to room ${roomId}`);
     this.roomId = roomId;
-    this.roundId = roundId;
-
+    
+    // Get active round ID directly from contract
     try {
-      // STEP 1: Check if GM is already registered
-      const { data: existingAgents } = await axios.get(`${this.endpoint}/agents/rooms/${roomId}`);
-      const isRegistered = existingAgents.data?.some((a: any) =>
-        a.agent_id === this.gmNumericId &&
-        a.wallet_address?.toLowerCase() === this.wallet.address.toLowerCase()
-      );
-
-      if (!isRegistered) {
-        // Register GM with proper snake_case
-        await axios.post(`${this.endpoint}/rooms/${roomId}/agents`, {
-          agent_id: this.gmNumericId,
-          wallet_address: this.wallet.address,
-          type: 'GM'
-        });
-        console.log('GM registered to room');
-
-        // Wait for registration to be confirmed
-        await new Promise(resolve => setTimeout(resolve, 2000));
-
-        // Verify registration
-        const { data: verifyRegistration } = await axios.get(`${this.endpoint}/agents/rooms/${roomId}`);
-        if (!verifyRegistration.data?.some((a: any) => a.agent_id === this.gmNumericId)) {
-          throw new Error('GM registration failed to persist');
-        }
-      } else {
-        console.log('GM already registered to room');
-      }
-
-      // STEP 2: Verify/Create Round
-      const roundData = {
-        room_id: roomId,
-        active: true,
-        game_master_id: this.gmNumericId,
-        round_config: null,
-        status: 'STARTING',
-        pvp_status_effects: '{}'
-      };
-
-      try {
-        await axios.post(`${this.endpoint}/rooms/${roomId}/rounds`, roundData);
-        console.log('Created new round');
-      } catch (createError: any) {
-        if (!createError.response?.data?.error?.includes('can only have one active round')) {
-          throw createError;
-        }
-        console.log('Using existing round');
-      }
-
-      // STEP 3: Get Active Round ID after a delay
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      const { data: roundList } = await axios.get(`${this.endpoint}/rooms/${roomId}/rounds?active=true`);
-      if (!roundList.success || !roundList.data?.length) {
-        throw new Error('No active round found');
-      }
-      const activeRound = roundList.data.find((r: any) => r.status !== 'END');
+      const activeRound = await this.getActiveRoundFromContract();
       if (!activeRound) {
         throw new Error('No active round found');
       }
-      this.roundId = activeRound.id; // Overwrite forced roundId with actual round
-
-      // STEP 4: Set up WebSocket with proper auth
-      const wsConfig: WebSocketConfig = {
-        endpoint: this.endpoint,
-        roomId: this.roomId,
-        auth: {
-          walletAddress: this.wallet.address,
-          agentId: this.gmNumericId,
-        },
-        handlers: {
-          onMessage: this.handleWebSocketMessage.bind(this),
-          onError: console.error,
-          onClose: () => {
-            if (this.isActive) {
-              console.log('GM disconnected, reconnecting...');
-              setTimeout(() => this.wsClient?.connect(), 5000);
-            }
-          }
-        }
-      };
-
-      // Close any existing connection
-      if (this.wsClient) {
-        this.wsClient.close();
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
-      // Create new WebSocket instance
-      this.wsClient = new SharedWebSocket(wsConfig);
-      await this.wsClient.connect();
-
-      // STEP 5: Subscribe to room
-      const subscribeMessage = {
-        messageType: WsMessageTypes.SUBSCRIBE_ROOM,
-        content: { roomId: this.roomId }
-      };
-      this.wsClient.send(subscribeMessage);
-
-      // STEP 6: Verify all expected agents
-      const expectedAgentIds = [50, 56, 57, 58]; // Expected agent IDs
-      await this.verifyAgentsInRoom(expectedAgentIds);
-
-      console.log('Room and round setup complete:', {
-        roomId: this.roomId,
-        roundId: this.roundId,
-        agentsVerified: true
-      });
-
+      this.roundId = activeRound;
+      console.log(`Connected to room ${roomId} round ${activeRound}`);
     } catch (error) {
-      console.error('Error in setRoomAndRound:', error);
+      console.error('Error getting active round:', error);
       throw error;
     }
+
+    // Initialize WS with proper auth
+    const timestamp = Date.now();
+    const authContent = sortObjectKeys({
+      walletAddress: this.wallet.address,
+      agentId: this.gmNumericId,
+      roomId: this.roomId,
+      timestamp
+    });
+    
+    const signature = await this.wallet.signMessage(JSON.stringify(authContent));
+
+    const wsConfig: WebSocketConfig = {
+      endpoint: this.endpoint,
+      roomId: this.roomId,
+      auth: {
+        walletAddress: this.wallet.address,
+        agentId: this.gmNumericId,
+        timestamp,
+        signature
+      },
+      handlers: {
+        onMessage: this.handleWebSocketMessage.bind(this),
+        onError: console.error,
+        onClose: () => {
+          if (this.isActive) {
+            console.log('GM disconnected, reconnecting...');
+            setTimeout(() => this.wsClient?.connect(), 5000);
+          }
+        }
+      }
+    };
+
+    // Create WebSocket connection
+    this.wsClient = new SharedWebSocket(wsConfig);
+    await this.wsClient.connect();
+
+    // Subscribe to room
+    const subscribeContent = sortObjectKeys({
+      roomId: this.roomId,
+      timestamp: Date.now()
+    });
+
+    const subscribeMessage = {
+      messageType: WsMessageTypes.SUBSCRIBE_ROOM,
+      content: subscribeContent,
+      signature: await this.wallet.signMessage(JSON.stringify(subscribeContent)),
+      sender: this.wallet.address
+    };
+
+    this.wsClient.send(subscribeMessage);
   }
 
-  // New helper method to verify expected agents are registered in the room
-  private async verifyAgentsInRoom(expectedAgentIds: number[]): Promise<void> {
-    const maxRetries = 30; // 30 retries (approximately 30 seconds)
-    let retries = 0;
+  private async getActiveRoundFromContract(): Promise<number> {
+    // TODO: Replace with actual contract call once you have the ABI
+    // For now return static value that matches backend
+    return 1;
+  }
 
-    while (retries < maxRetries) {
-      const { data: agents } = await axios.get(`${this.endpoint}/agents/rooms/${this.roomId}`);
-      const registeredAgentIds = agents.data?.map((a: any) => a.agent_id) || [];
-      const missingAgents = expectedAgentIds.filter(id => !registeredAgentIds.includes(id));
-
-      if (missingAgents.length === 0) {
-        console.log('All expected agents verified in room');
-        return;
-      }
-
-      console.log(`Waiting for agents to register: ${missingAgents.join(', ')}`);
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      retries++;
+  public async sendGMMessage(text: string, targets: number[] = []): Promise<void> {
+    if (!this.roomId || !this.roundId) {
+      throw new Error('GameMaster not initialized with room/round');
     }
 
-    throw new Error('Timeout waiting for all agents to register');
+    const content = sortObjectKeys({
+      gmId: this.gmNumericId,
+      timestamp: Date.now(),
+      roomId: this.roomId,
+      roundId: this.roundId,
+      message: text,
+      targets,
+      ignoreErrors: false
+    });
+
+    const messageString = JSON.stringify(content);
+    const signature = await this.wallet.signMessage(messageString);
+
+    const message = gmMessageInputSchema.parse({
+      messageType: WsMessageTypes.GM_MESSAGE,
+      signature,
+      sender: this.wallet.address,
+      content
+    });
+
+    await this.wsClient.send(message);
   }
 
   private async getRoundState(): Promise<any> {
@@ -331,59 +293,6 @@ export class GameMasterClient extends DirectClient {
     }
   }
 
-  public async sendGMMessage(text: string, targets: number[] = []): Promise<void> {
-    if (!this.roomId || !this.roundId) {
-      throw new Error('GameMaster not initialized with room/round');
-    }
-
-    try {
-        const roundState = await this.getRoundState();
-        console.log('Round state before sending message:', roundState);
-
-        // Validate targets against registered participants
-        const validTargets = roundState.participants.map((p: any) => p.agent_id);
-        if (targets.length && !targets.every(t => validTargets.includes(t))) {
-          // Use valid targets from server to fix target mismatch
-          targets = validTargets;
-          console.log('Targets overridden with valid targets:', targets);
-        }
-
-        const content = sortObjectKeys({
-            gmId: this.gmNumericId,
-            ignoreErrors: false,
-            message: text,
-            roomId: this.roomId,
-            roundId: this.roundId,
-            targets,
-            timestamp: Date.now()
-        });
-
-        const signature = await this.generateSignature(content);
-
-        const message = gmMessageInputSchema.parse({
-            messageType: WsMessageTypes.GM_MESSAGE,
-            sender: this.wallet.address,
-            signature,
-            content
-        });
-
-        console.log('Sending GM message:', JSON.stringify(message, null, 2));
-        const response = await axios.post(
-            `${this.endpoint}/messages/gmMessage`,
-            message,
-            {
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            }
-        );
-        console.log('GM message sent:', response.data);
-    } catch (error) {
-        console.error('Error sending GM message:', error);
-        throw error;
-    }
-  }
-
   public async broadcastToRoom(content: { text: string }): Promise<void> {
     await this.sendGMMessage(content.text, []);
   }
@@ -393,17 +302,26 @@ export class GameMasterClient extends DirectClient {
       const message = JSON.parse(data.toString());
       
       switch (message.messageType) {
-        case WsMessageTypes.SYSTEM_NOTIFICATION:
-          console.log('GM System notification:', message.content.text);
+        case WsMessageTypes.HEARTBEAT:
+          // Respond to heartbeat with signed message
+          const heartbeatContent = sortObjectKeys({
+            timestamp: Date.now()
+          });
+          
+          this.wallet.signMessage(JSON.stringify(heartbeatContent))
+            .then(signature => {
+              this.wsClient?.send({
+                messageType: WsMessageTypes.HEARTBEAT,
+                content: heartbeatContent,
+                signature,
+                sender: this.wallet.address
+              });
+            })
+            .catch(console.error);
           break;
 
-        case WsMessageTypes.HEARTBEAT:
-          if (this.wsClient?.isConnected()) {
-            this.wsClient.send({
-              messageType: WsMessageTypes.HEARTBEAT,
-              content: {}
-            });
-          }
+        case WsMessageTypes.SYSTEM_NOTIFICATION:
+          console.log('GM System notification:', message.content.text);
           break;
       }
     } catch (error) {

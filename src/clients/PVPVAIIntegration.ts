@@ -9,40 +9,36 @@ export interface Config {
   creatorId: number;
   agentId?: number;
   port: number;
-  privateKey?: string; // Add private key to config
+  privateKey?: string;
+  roomId?: number; // roundid is doen in backend
 }
 
-// Configuration for different agents with fixed room/round
+// Configuration for different agents
 export const AGENT_CONFIGS = {
   GAMEMASTER: {
     port: 3330,
     endpoint: process.env.BACKEND_URL || "http://localhost:3000",
-    roomId: 290, // Use existing room
-    roundId: undefined // Removed fixed 562
+    roomId: Number(process.env.ROOM_ID) || 290
   },
   AGENT1: {
     port: 3331,
     endpoint: process.env.BACKEND_URL || "http://localhost:3000",
-    roomId: 290,
-    roundId: undefined
+    roomId: Number(process.env.ROOM_ID) || 290
   },
   AGENT2: {
     port: 3332,
     endpoint: process.env.BACKEND_URL || "http://localhost:3000",
-    roomId: 290,
-    roundId: undefined
+    roomId: Number(process.env.ROOM_ID) || 290
   },
   AGENT3: {
     port: 3333,
     endpoint: process.env.BACKEND_URL || "http://localhost:3000",
-    roomId: 290,
-    roundId: undefined
+    roomId: Number(process.env.ROOM_ID) || 290
   },
   AGENT4: {
     port: 3334,
     endpoint: process.env.BACKEND_URL || "http://localhost:3000",
-    roomId: 290,
-    roundId: undefined
+    roomId: Number(process.env.ROOM_ID) || 290
   }
 };
 
@@ -98,26 +94,27 @@ export class PVPVAIIntegration {
 
   public async initialize(): Promise<void> {
     const isGM = this.client instanceof GameMasterClient;
-    const config = isGM ? AGENT_CONFIGS.GAMEMASTER : this.getAgentConfig();
+    const roomId = Number(process.env.ROOM_ID) || 290;
 
-    if (isGM) {
-      // Connect GM to existing room instead of creating new one
-      this.client.setRoomAndRound(config.roomId, config.roundId);
-    } else {
-      // Connect agent to same room as GM
-      this.client.setRoomAndRound(config.roomId, config.roundId);
-    }
+    // Connect to room - backend will handle round assignment
+    await this.client.setRoomAndRound(roomId);
   }
 
   private getAgentConfig(agentId?: number) {
     const id = agentId || (this.runtime.character as any).settings?.pvpvai?.agentId;
-    switch(id) {
-      case 50: return AGENT_CONFIGS.AGENT1;
-      case 56: return AGENT_CONFIGS.AGENT2;
-      case 57: return AGENT_CONFIGS.AGENT3;
-      case 58: return AGENT_CONFIGS.AGENT4;
-      default: throw new Error(`Unknown agent ID: ${id}`);
-    }
+    const config = {
+      roomId: Number(process.env.ROOM_ID) || 290,
+      ...(() => {
+        switch(id) {
+          case 50: return AGENT_CONFIGS.AGENT1;
+          case 56: return AGENT_CONFIGS.AGENT2; 
+          case 57: return AGENT_CONFIGS.AGENT3;
+          case 58: return AGENT_CONFIGS.AGENT4;
+          default: throw new Error(`Unknown agent ID: ${id}`);
+        }
+      })()
+    };
+    return config;
   }
 
   public async sendAIMessage(text: string): Promise<void> {

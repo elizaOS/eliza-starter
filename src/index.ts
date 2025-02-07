@@ -185,34 +185,43 @@ const startAgents = async () => {
   }
   
   try {
-    // Start single agent
-    const char = characters[0];
-    const extendedChar = char as unknown as ExtendedCharacter;
-    if (!extendedChar.agentRole) {
-      throw new Error(`Character ${extendedChar.name} missing required agentRole configuration`);
-    }
+    // Start all agents
+    const runtimes: ExtendedAgentRuntime[] = [];
     
-    const extendedCharacter: Character = {
-      ...extendedChar,
-      settings: extendedChar.settings || {},
-      agentRole: extendedChar.agentRole
-    };
+    for (const char of characters) {
+      const extendedChar = char as unknown as ExtendedCharacter;
+      if (!extendedChar.agentRole) {
+        throw new Error(`Character ${extendedChar.name} missing required agentRole configuration`);
+      }
+      
+      const extendedCharacter: Character = {
+        ...extendedChar,
+        settings: extendedChar.settings || {},
+        agentRole: extendedChar.agentRole
+      };
 
-    const runtime = await startAgent(extendedCharacter, directClient);
-    console.log('Started agent:', {
-      name: runtime.character.name,
-      type: runtime.character.agentRole?.type,
-      id: runtime.agentId
-    });
+      const runtime = await startAgent(extendedCharacter, directClient);
+      runtimes.push(runtime);
+      
+      console.log('Started agent:', {
+        name: runtime.character.name,
+        type: runtime.character.agentRole?.type,
+        id: runtime.agentId
+      });
+    }
 
-    if (extendedChar.agentRole?.type.toUpperCase() === 'GM') {
-      // If this is the GM, start the debate orchestrator
-      const orchestrator = new DebateOrchestrator([runtime]);
+    // Find GM in runtimes
+    const gmRuntime = runtimes.find(r => r.character.agentRole?.type.toUpperCase() === 'GM');
+    if (gmRuntime) {
+      // Start debate orchestrator with all runtimes
+      const orchestrator = new DebateOrchestrator(runtimes);
       elizaLogger.log("Waiting for connections to establish...");
       await new Promise(resolve => setTimeout(resolve, 8000));
       
       try {
         elizaLogger.log("Starting debate...");
+        const roomId = process.env.ROOM_ID ? parseInt(process.env.ROOM_ID) : 290;
+        await orchestrator.initialize(roomId);
         await orchestrator.startDebate();
       } catch (error) {
         elizaLogger.error('Error starting debate:', error);
