@@ -1,110 +1,56 @@
-// IMPORTANT: Message Signing Protocol
-// All messages are deterministically stringified by sorting object keys recursively (using sortObjectKeys)
-// before signing. Ensure the client and server use the identical sorting function.
-
 import axios from 'axios';
 import { DirectClient } from '@elizaos/client-direct';
-import { AIResponse, MessageHistoryEntry } from './types.ts';
-import { agentMessageInputSchema, gmMessageInputSchema, observationMessageInputSchema } from '../types/schemas.ts';
-import { WsMessageTypes } from '../types/ws.ts';
-import { z } from 'zod';
-import { PvPEffect } from '../types/schemas.ts';
-import { PvpActions } from '../types/pvp.ts';
 import { ethers } from 'ethers';
-import { sortObjectKeys } from './sortObjectKeys.ts';  // Imported shared sortObjectKeys
-import WebSocket from 'ws'; // Import WebSocket
+import WebSocket from 'ws';
+import { WsMessageTypes } from '../types/ws.ts';
+import { agentMessageInputSchema, gmMessageInputSchema, observationMessageInputSchema } from '../types/schemas.ts';
+import { sortObjectKeys } from './sortObjectKeys.ts';
 import { SharedWebSocket, WebSocketConfig } from './shared-websocket.ts';
+import { ExtendedAgentRuntime } from '../types/index.ts';
+import { MessageHistoryEntry } from './types.ts';
 
-/**
- * AgentClient handles individual agent interactions with the PvPvAI system
- * 
- * Key responsibilities:
- * - Maintains WebSocket connection to server
- * - Handles message signing and verification
- * - Processes PvP effects received from GM
- * - Manages message queue with retries
- * - Maintains message history context
- * 
- * Communication channels:
- * - WebSocket for real-time updates
- * - REST API for message sending
- * 
- * @class AgentClient
- * @extends DirectClient
- */
+
 
 export class AgentClient extends DirectClient {
+  private readonly wallet: ethers.Wallet;
   private readonly walletAddress: string;
   private readonly agentNumericId: number;
   private roomId: number;
   private roundId: number;
   private readonly endpoint: string;
-  private readonly creatorId: number;
-  private readonly messageQueue: Array<{
-    content: string;
-    timestamp: number;
-    retries: number;
-  }> = [];
-  private readonly maxRetries = 3;
-  private processingQueue = false;
+  private readonly wsClient: SharedWebSocket;
   private isActive = true;
-  private activeEffects: PvPEffect[] = [];
+
+  // Add PvP status tracking
+  private activePvPEffects: Map<string, any> = new Map();
+
+  // Add these properties after the existing private properties
   private messageContext: MessageHistoryEntry[] = [];
   private readonly MAX_CONTEXT_SIZE = 8;
-  private readonly wallet: ethers.Wallet;  // Use the existing wallet property
-  private wsClient: SharedWebSocket;
 
-  /**
-   * Initializes a new agent client instance
-   * 
-   * @param endpoint - Server endpoint URL
-   * @param walletAddress - Agent's Ethereum wallet address
-   * @param creatorId - Creator's unique identifier
-   * @param agentNumericId - Agent's numeric database ID
-   */
   constructor(
     endpoint: string,
     walletAddress: string,
-    creatorId: number,
-    agentNumericId: number
+    agentNumericId: number,
+    port: number
   ) {
     super();
     this.endpoint = endpoint;
     this.walletAddress = walletAddress;
-    this.creatorId = creatorId;
     this.agentNumericId = agentNumericId;
 
-    const privateKey = process.env[`AGENT_${agentNumericId}_PRIVATE_KEY`] || process.env.AGENT_PRIVATE_KEY;
+    // Get agent's private key from environment
+    const privateKey = process.env[`AGENT_${agentNumericId}_PRIVATE_KEY`];
     if (!privateKey) {
       throw new Error(`Private key not found for agent ${agentNumericId}`);
     }
 
-    const derivedWallet = new ethers.Wallet(privateKey);
-    if (derivedWallet.address.toLowerCase() !== walletAddress.toLowerCase()) {
-      throw new Error(
-        `Private key mismatch - derived address ${derivedWallet.address} does not match expected ${walletAddress}`
-      );
+    this.wallet = new ethers.Wallet(privateKey);
+    if (this.wallet.address.toLowerCase() !== walletAddress.toLowerCase()) {
+      throw new Error(`Private key mismatch for agent ${agentNumericId}`);
     }
 
-    this.wallet = derivedWallet; // Assign to the class property
-
-    console.log(`AgentClient initialized:`, {
-      endpoint,
-      walletAddress,
-      creatorId,
-      agentNumericId
-    });
-
-    // Initialize wsClient in setRoomAndRound instead
-    this.wsClient = null;
-  }
-
-  public setRoomAndRound(roomId: number, roundId: number): void {
-    console.log(`Setting room ${roomId} and round ${roundId}`);
-    this.roomId = roomId;
-    this.roundId = roundId;
-
-    // Configure WebSocket
+    // Initialize WebSocket config
     const wsConfig: WebSocketConfig = {
       endpoint: this.endpoint,
       roomId: this.roomId,
@@ -114,51 +60,343 @@ export class AgentClient extends DirectClient {
       },
       handlers: {
         onMessage: this.handleWebSocketMessage.bind(this),
-        onError: (error) => console.error(`Agent ${this.agentNumericId} WebSocket error:`, error),
-        onClose: () => console.log(`Agent ${this.agentNumericId} WebSocket connection closed`)
+        onError: console.error,
+        onClose: () => console.log(`Agent ${this.agentNumericId} disconnected`)
       }
     };
 
-    // Create and connect WebSocket
     this.wsClient = new SharedWebSocket(wsConfig);
-    this.wsClient.connect().catch(console.error);
   }
 
-  public async handleGMMessage(message: z.infer<typeof gmMessageInputSchema>): Promise<void> {
-    try {
-      const validatedMessage = gmMessageInputSchema.parse(message);
-      const deafened = this.activeEffects.some(
-        e => e.actionType === PvpActions.DEAFEN && Date.now() < e.expiresAt
-      );
+  public async setRoomAndRound(roomId: number, roundId: number): Promise<void> {
+    console.log(`Setting room ${roomId} and round ${roundId} for agent ${this.agentNumericId}`);
+    this.roomId = roomId;
 
-      if (!deafened) {
-        if (this.messageContext.length >= this.MAX_CONTEXT_SIZE) {
-          this.messageContext.shift();
+    try {
+        // STEP 1: Register agent in room first
+        try {
+            const { data: agents } = await axios.get(`${this.endpoint}/agents/rooms/${roomId}`);
+            const isRegistered = agents.data?.some((a: any) => 
+                a.agent_id === this.agentNumericId && 
+                a.wallet_address?.toLowerCase() === this.walletAddress.toLowerCase()
+            );
+
+            if (!isRegistered) {
+                // Register agent with snake_case fields
+                await axios.post(`${this.endpoint}/rooms/${roomId}/agents`, {
+                    agent_id: this.agentNumericId,
+                    wallet_address: this.walletAddress,
+                    type: 'AGENT'
+                });
+                console.log('Agent registered to room');
+            } else {
+                console.log('Agent already registered to room');
+            }
+        } catch (error) {
+            console.error('Error checking/registering agent:', error);
+            throw error;
         }
 
-        this.messageContext.push({
-          timestamp: validatedMessage.content.timestamp,
-          agentId: 51, // GM ID
-          text: validatedMessage.content.message,
-          agentName: 'Game Master',
-          role: 'gm'
+        // STEP 2: Get active round
+        const { data: roundList } = await axios.get(`${this.endpoint}/rooms/${roomId}/rounds?active=true`);
+        if (!roundList.success || !roundList.data?.length) {
+            throw new Error('No active round found');
+        }
+        
+        // Choose any active round that isn't marked "END"
+        const activeRound = roundList.data.find((r: any) => r.status !== 'END');
+        if (!activeRound) {
+            throw new Error('No active round found');
+        }
+        this.roundId = activeRound.id;
+
+        // STEP 3: Initialize WebSocket connection
+        if (this.wsClient) {
+            await this.wsClient.connect();
+            
+            // Send subscription message with proper format
+            const subscribeMessage = {
+                messageType: WsMessageTypes.SUBSCRIBE_ROOM,
+                content: sortObjectKeys({
+                    room_id: this.roomId,
+                    timestamp: Date.now()
+                })
+            };
+            
+            this.wsClient.send(subscribeMessage);
+        }
+
+        console.log(`Agent ${this.agentNumericId} initialized with room ${this.roomId} and round ${this.roundId}`);
+
+    } catch (error) {
+        if (axios.isAxiosError(error)) {
+            console.error('Error initializing agent:', {
+                status: error.response?.status,
+                data: error.response?.data,
+                config: {
+                    url: error.config?.url,
+                    method: error.config?.method,
+                    data: error.config?.data
+                }
+            });
+        } else {
+            console.error('Error initializing agent:', error);
+        }
+        throw error;
+    }
+}
+
+// Helper methods to match SQL data
+  private getAgentImage(id: number): string {
+    const images: {[key: number]: string} = {
+      50: 'https://randomuser.me/api/portraits/lego/9.jpg',
+      51: 'https://imgur.com/a/kTIC1Vf',
+      56: 'https://randomuser.me/api/portraits/men/44.jpg',
+      57: 'https://randomuser.me/api/portraits/women/45.jpg',
+      58: 'https://randomuser.me/api/portraits/men/46.jpg'
+    };
+    return images[id] || 'https://placekitten.com/200/200';
+  }
+
+  private getAgentColor(id: number): string {
+    const colors: {[key: number]: string} = {
+      50: '#66f817',
+      51: '#E0E722',
+      56: '#627EEA',
+      57: '#14F195',
+      58: '#E84142'
+    };
+    return colors[id] || '#' + Math.floor(Math.random()*16777215).toString(16);
+  }
+
+  private getAgentName(id: number): string {
+    const names: {[key: number]: string} = {
+      50: 'Alfred',
+      51: 'Gaia',
+      56: 'Batman',
+      57: 'Celine',
+      58: 'Dolo'
+    };
+    return names[id] || `Agent ${id}`;
+  }
+
+  private getAgentSummary(id: number): string {
+    const summaries: {[key: number]: string} = {
+      50: 'Alfred, advocate for BTC',
+      51: 'Not actually a mother',
+      56: 'Ethereum maximalist focused on smart contract capabilities',
+      57: 'Solana maximalist advocating for high performance',
+      58: 'Avalanche maximalist championing subnet technology'
+    };
+    return summaries[id] || '';
+  }
+
+  public async sendAIMessage(content: { text: string }): Promise<void> {
+    if (!this.roomId || !this.roundId) {
+      throw new Error('Agent not initialized with room and round IDs');
+    }
+
+    try {
+        // Get message history for context first
+        const { data: history } = await axios.get(
+            `${this.endpoint}/messages/round/${this.roundId}?limit=10`
+        );
+
+        // Create message content with fields in exact order
+        const messageContent = sortObjectKeys({
+            agentId: this.agentNumericId,
+            context: history?.data || [], // Context must be first
+            roomId: this.roomId,
+            roundId: this.roundId,
+            text: content.text,
+            timestamp: Date.now()
         });
 
-        if (validatedMessage.content.additionalData?.activePvPEffects) {
-          for (const effect of validatedMessage.content.additionalData.activePvPEffects) {
-            await this.handlePvPEffect(effect);
-          }
+        // Generate signature
+        const signature = await this.generateSignature(messageContent);
+
+        // Construct final message
+        const message = agentMessageInputSchema.parse({
+            messageType: WsMessageTypes.AGENT_MESSAGE,
+            signature,
+            sender: this.walletAddress,
+            content: messageContent
+        });
+
+        console.log('Sending message:', JSON.stringify(message, null, 2));
+        
+        await axios.post(
+            `${this.endpoint}/messages/agentMessage`,
+            message,
+            {
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            }
+        );
+    } catch (error) {
+        console.error('Error sending agent message:', error);
+        throw error;
+    }
+}
+
+  public getAgentId(): number {
+    return this.agentNumericId;
+  }
+
+  private async generateSignature(content: any): Promise<string> {
+    // Create message object with exact field order matching backend
+    const messageObj = sortObjectKeys({
+        agentId: content.agentId,
+        context: content.context || [], // Context must be first
+        roomId: content.roomId,
+        roundId: content.roundId,
+        text: content.text,
+        timestamp: content.timestamp
+    });
+
+    const messageString = JSON.stringify(messageObj, null, 0); // Use null, 0 to avoid whitespace
+    console.log('Agent signing message:', messageString);
+    return await this.wallet.signMessage(messageString);
+}
+
+  private async handleGMMessage(message: any): Promise<void> {
+    try {
+      const validatedMessage = gmMessageInputSchema.parse(message);
+      // Generate response using the chat module
+      const response = await this.processMessage(validatedMessage.content.message);
+      if (response) {
+        await this.sendAIMessage({ text: response });
+      }
+    } catch (error) {
+      console.error('Error handling GM message:', error);
+    }
+  }
+
+  private async handleAgentMessage(message: any): Promise<void> {
+    try {
+      const validatedMessage = agentMessageInputSchema.parse(message);
+      // Only respond to messages from other agents
+      if (validatedMessage.content.agentId !== this.agentNumericId) {
+        const response = await this.processMessage(validatedMessage.content.text);
+        if (response) {
+          await this.sendAIMessage({ text: response });
         }
       }
     } catch (error) {
-      console.error('Invalid GM message:', error);
-      throw error;
+      console.error('Error handling agent message:', error);
+    }
+  }
+
+  private async handleObservation(message: any): Promise<void> {
+    try {
+      const validatedMessage = observationMessageInputSchema.parse(message);
+      // Process observation if for current round
+      if (validatedMessage.content.roundId === this.roundId) {
+        const response = await this.processMessage(
+          `Observed: ${JSON.stringify(validatedMessage.content.data)}`
+        );
+        if (response) {
+          await this.sendAIMessage({ text: response });
+        }
+      }
+    } catch (error) {
+      console.error('Error handling observation:', error);
+    }
+  }
+
+  protected async processMessage(message: string): Promise<string | null> {
+    try {
+      // Handle raw string messages from GM
+      if (typeof message === 'string' && !message.startsWith('{')) {
+        const prompt = this.buildPromptWithContext(message);
+        // Here you would integrate with your AI processing
+        // For now returning the message as-is
+        return message;
+      }
+
+      // Handle JSON messages
+      const parsedMessage = JSON.parse(message);
+      
+      // First check if message should be processed based on PvP status
+      if (this.isAffectedByPvP(parsedMessage)) {
+        return null;
+      }
+
+      // Apply any PvP modifications
+      const modifiedMessage = this.applyPvPEffects(parsedMessage);
+
+      // Update context based on message type
+      switch (modifiedMessage.messageType) {
+        case WsMessageTypes.GM_MESSAGE:
+          if (this.messageContext.length >= this.MAX_CONTEXT_SIZE) {
+            this.messageContext.shift();
+          }
+          this.messageContext.push({
+            timestamp: Date.now(),
+            agentId: 51, // GM ID
+            text: modifiedMessage.content.message,
+            agentName: 'Game Master',
+            role: 'gm'
+          });
+          const gmPrompt = this.buildPromptWithContext(modifiedMessage.content.message);
+          return gmPrompt;
+
+        case WsMessageTypes.AGENT_MESSAGE:
+          if (modifiedMessage.content.agentId !== this.agentNumericId) {
+            if (this.messageContext.length >= this.MAX_CONTEXT_SIZE) {
+              this.messageContext.shift();
+            }
+            this.messageContext.push({
+              timestamp: Date.now(),
+              agentId: modifiedMessage.content.agentId,
+              text: modifiedMessage.content.text,
+              agentName: `Agent ${modifiedMessage.content.agentId}`,
+              role: 'agent'
+            });
+            const agentPrompt = this.buildPromptWithContext(modifiedMessage.content.text);
+            return agentPrompt;
+          }
+          return null;
+
+        case WsMessageTypes.OBSERVATION:
+          if (this.messageContext.length >= this.MAX_CONTEXT_SIZE) {
+            this.messageContext.shift();
+          }
+          this.messageContext.push({
+            timestamp: Date.now(),
+            agentId: modifiedMessage.content.agentId,
+            text: `Observation: ${JSON.stringify(modifiedMessage.content.data)}`,
+            agentName: 'Oracle',
+            role: 'oracle'
+          });
+          const obsPrompt = this.buildPromptWithContext(
+            `Observation: ${JSON.stringify(modifiedMessage.content.data)}`
+          );
+          return obsPrompt;
+
+        case WsMessageTypes.HEARTBEAT:
+          return JSON.stringify({
+            messageType: WsMessageTypes.HEARTBEAT,
+            content: {}
+          });
+
+        case WsMessageTypes.SYSTEM_NOTIFICATION:
+          console.log('System notification:', modifiedMessage.content);
+          return null;
+
+        default:
+          console.log('Unknown message type:', modifiedMessage.messageType);
+          return null;
+      }
+    } catch (error) {
+      console.error('Error processing message:', error);
+      return null;
     }
   }
 
   private buildPromptWithContext(text: string): string {
-
-      let prompt = `You are participating in a crypto debate. Your message should be a direct response to the conversation context below.
+    let prompt = `You are participating in a crypto debate. Your message should be a direct response to the conversation context below.
 
 Previous messages:
 ${this.messageContext.map(msg => 
@@ -175,163 +413,84 @@ Based on this context, respond with your perspective on the discussion. Remember
 Your response to the current topic: ${text}
 `;
     return prompt;
-
   }
 
-  public async sendAIMessage(content: { text: string }): Promise<void> {
-    if (!this.roomId || !this.roundId) {
-      throw new Error('Agent not initialized with room and round IDs');
+  private isAffectedByPvP(message: any): boolean {
+    // Check for silence/deafen effects
+    const silenceEffect = this.activePvPEffects.get('SILENCE');
+    const deafenEffect = this.activePvPEffects.get('DEAFEN');
+    
+    if (silenceEffect && message.messageType === 'agent_message') {
+      return true; // Blocked by silence
     }
-
-    const silenced = this.activeEffects.some(
-      e => e.actionType === PvpActions.SILENCE && Date.now() < e.expiresAt
-    );
-    if (silenced) {
-      console.log(`Agent ${this.agentNumericId} is silenced, cannot send message`);
-      return;
+    if (deafenEffect && message.messageType === 'agent_message') {
+      return true; // Blocked by deafen
     }
+    return false;
+  }
 
-    let modifiedText = content.text;
-    const poisonEffects = this.activeEffects.filter(
-      e => e.actionType === PvpActions.POISON && Date.now() < e.expiresAt
-    );
-
-    for (const effect of poisonEffects) {
-      if (effect.details) {
-        const regex = new RegExp(
-          effect.details.find,
-          effect.details.case_sensitive ? 'g' : 'gi'
-        );
-        modifiedText = modifiedText.replace(regex, effect.details.replace);
-        console.log(`Applied POISON effect to message:`, {
-          original: content.text,
-          modified: modifiedText,
-          effect
-        });
-      }
-    }
-
-    const timestamp = Date.now();
-
-    // Extract core content for signing only
-    const signedContent = {
-      timestamp,
-      roomId: this.roomId,
-      roundId: this.roundId,
-      agentId: this.agentNumericId,
-      text: modifiedText
-    };
-
-    // Generate signature on the core content
-    const signature = await this.generateDevSignature(signedContent);
-
-    // Build full message including context separately
-    const message = agentMessageInputSchema.parse({
-      messageType: WsMessageTypes.AGENT_MESSAGE,
-      signature,
-      sender: this.walletAddress,
-      content: {
-        ...signedContent,
-        context: {
-          messageHistory: this.messageContext
-        }
-      }
-    });
-
-    try {
-      const truncatedSignature = signature.substring(0, 5) + "...";
-      console.log(`Sending message with context: {..., signature: ${truncatedSignature}, ...}`);
-
-      const response = await axios.post<AIResponse>(
-        `${this.endpoint}/messages/agentMessage`,
-        message,
-        {
-          headers: {
-            'Content-Type': 'application/json'
-          }
-        }
+  private applyPvPEffects(message: any): any {
+    let modified = {...message};
+    
+    // Apply poison effect if active
+    const poisonEffect = this.activePvPEffects.get('POISON');
+    if (poisonEffect && message.content?.text) {
+      modified.content.text = this.applyPoisonEffect(
+        message.content.text,
+        poisonEffect
       );
+    }
+    
+    return modified;
+  }
 
-      if (response.data.error) {
-        throw new Error(response.data.error);
-      }
+  private applyPoisonEffect(text: string, effect: any): string {
+    const {find, replace, caseSensitive} = effect;
+    const regex = new RegExp(find, caseSensitive ? 'g' : 'gi');
+    return text.replace(regex, replace);
+  }
 
-      if (this.messageContext.length >= this.MAX_CONTEXT_SIZE) {
-        this.messageContext.shift();
-      }
-      this.messageContext.push({
-        timestamp,
-        agentId: this.agentNumericId,
-        text: modifiedText,
-        agentName: `Agent ${this.agentNumericId}`,
-        role: 'agent'
-      });
-
-    } catch (error) {
-      console.error('Error sending AI message:', error);
-      this.queueMessage(content.text, timestamp);  // Keep original text for retries
-      throw error;
+  // Handle PvP status updates
+  private handlePvPStatusUpdate(message: any): void {
+    if (message.type === 'PVP_ACTION_ENACTED') {
+      this.activePvPEffects.set(message.action.type, message.action);
+    } else if (message.type === 'PVP_STATUS_REMOVED') {
+      this.activePvPEffects.delete(message.action.type);
     }
   }
 
-  private async generateDevSignature(content: any): Promise<string> {
+  private handleWebSocketMessage(data: WebSocket.Data): void {
     try {
-      // Log the content being signed for debugging purposes
-      console.log('Signing content:', content);
-      // Use deterministic stringification via sorted keys
-      const messageString = JSON.stringify(sortObjectKeys(content));
-      const signature = await this.wallet.signMessage(messageString);
+      const message = JSON.parse(data.toString());
+      
+      switch (message.messageType) {
+        case WsMessageTypes.GM_MESSAGE:
+          this.handleGMMessage(message).catch(console.error);
+          break;
 
-      // Local verification using the same sorted string
-      const recoveredAddress = ethers.verifyMessage(messageString, signature);
-      if (recoveredAddress.toLowerCase() !== this.walletAddress.toLowerCase()) {
-        throw new Error(`Signature verification failed locally - recovered ${recoveredAddress} but expected ${this.walletAddress}`);
+        case WsMessageTypes.AGENT_MESSAGE:
+          this.handleAgentMessage(message).catch(console.error);
+          break;
+
+        case WsMessageTypes.OBSERVATION:
+          this.handleObservation(message).catch(console.error);
+          break;
+
+        case WsMessageTypes.SYSTEM_NOTIFICATION:
+          console.log(`System notification for agent ${this.agentNumericId}:`, message.content.text);
+          break;
+
+        case WsMessageTypes.HEARTBEAT:
+          if (this.wsClient?.isConnected()) {
+            this.wsClient.send({
+              messageType: WsMessageTypes.HEARTBEAT,
+              content: {}
+            });
+          }
+          break;
       }
-      return signature;
     } catch (error) {
-      console.error('Error generating signature:', error);
-      throw error;
-    }
-  }
-
-  private queueMessage(content: string, timestamp: number) {
-    this.messageQueue.push({
-      content,
-      timestamp,
-      retries: 0
-    });
-
-    if (!this.processingQueue) {
-      this.processQueue();
-    }
-  }
-
-  private async processQueue() {
-    if (!this.isActive || this.messageQueue.length === 0) {
-      this.processingQueue = false;
-      return;
-    }
-
-    this.processingQueue = true;
-    const message = this.messageQueue[0];
-
-    try {
-      await this.sendAIMessage({ text: message.content });
-      this.messageQueue.shift();
-    } catch (error) {
-      message.retries++;
-      if (message.retries >= this.maxRetries) {
-        console.error('Message failed after max retries, dropping:', message);
-        this.messageQueue.shift();
-      } else {
-        await new Promise(resolve => setTimeout(resolve, 5000 * message.retries));
-      }
-    }
-
-    if (this.messageQueue.length > 0) {
-      setTimeout(() => this.processQueue(), 1000);
-    } else {
-      this.processingQueue = false;
+      console.error('Error handling WebSocket message:', error);
     }
   }
 
@@ -344,86 +503,8 @@ Your response to the current topic: ${text}
   }
 
   public override stop(): void {
-    if (this.wsClient) {
-      this.wsClient.close();
-    }
     this.isActive = false;
-    this.messageContext = [];
+    this.wsClient?.close();
     super.stop();
-  }
-
-    public async handlePvPEffect(effect: PvPEffect): Promise<void> {
-    // Store effect
-    this.activeEffects.push(effect);
-    console.log(`PvP effect applied to agent ${this.agentNumericId}:`, effect);
-
-    // Clean expired effects
-    this.activeEffects = this.activeEffects.filter(e => Date.now() < e.expiresAt);
-  }
-
-  // Modified to only handle GM-validated observations
-  public async handleObservation(observation: z.infer<typeof observationMessageInputSchema>): Promise<void> {
-    try {
-      // Check if agent is blinded before processing
-      if (this.activeEffects.some(
-        e => e.actionType === 'BLIND' && Date.now() < e.expiresAt  // Use string literal instead of enum
-      )) {
-        console.log(`Agent ${this.agentNumericId} is blinded, ignoring observation`);
-        return;
-      }
-      
-      // Store in message context if in current round
-      if (observation.content.roundId === this.roundId) {
-        if (this.messageContext.length >= this.MAX_CONTEXT_SIZE) {
-          this.messageContext.shift();
-        }
-        
-        this.messageContext.push({
-          timestamp: observation.content.timestamp,
-          agentId: observation.content.agentId,
-          text: `Observation: ${JSON.stringify(observation.content.data)}`,
-          agentName: 'Oracle',
-          role: 'agent'
-        });
-      }
-    } catch (error) {
-      console.error('Error handling observation:', error);
-      throw error;
-    }
-  }
-
-  private handleWebSocketMessage(data: WebSocket.Data): void {
-    try {
-      const message = JSON.parse(data.toString());
-      
-      switch (message.messageType) {
-        case WsMessageTypes.SYSTEM_NOTIFICATION:
-          console.log(`Agent ${this.agentNumericId} notification:`, message.content.text);
-          break;
-          
-        case WsMessageTypes.HEARTBEAT:
-          if (this.wsClient.isConnected()) {
-            this.wsClient.send({
-              messageType: WsMessageTypes.HEARTBEAT,
-              content: {}
-            });
-          }
-          break;
-
-        case WsMessageTypes.GM_MESSAGE:
-          this.handleGMMessage(message).catch(err => 
-            console.error('Error handling GM message:', err)
-          );
-          break;
-
-        case WsMessageTypes.OBSERVATION:
-          this.handleObservation(message).catch(err => 
-            console.error('Error handling observation:', err)
-          );
-          break;
-      }
-    } catch (error) {
-      console.error('Error handling WebSocket message:', error);
-    }
   }
 }

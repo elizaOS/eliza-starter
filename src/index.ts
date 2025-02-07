@@ -10,13 +10,11 @@ import { bootstrapPlugin } from "@elizaos/plugin-bootstrap";
 import { createNodePlugin } from "@elizaos/plugin-node";
 import { solanaPlugin } from "@elizaos/plugin-solana";
 import fs from "fs";
-import net from "net";
 import path from "path";
 import { fileURLToPath } from "url";
 import { initializeDbCache } from "./cache/index.ts";
 import { character } from "./character.ts";
 import { startChat } from "./chat/index.ts";
-import { initializeClients } from "./clients/index.ts";
 import {
   getTokenForProvider,  
   loadCharacters,
@@ -24,10 +22,9 @@ import {
 } from "./config/index.ts";
 import { initializeDatabase } from "./database/index.ts";
 import { 
-  PVPVAIIntegration, 
   createPVPVAIClient, 
+  AGENT_CONFIGS 
 } from './clients/PVPVAIIntegration.ts';
-import { AgentConfig, BroadcastContent, GameMasterConfig } from "./clients/types.ts";
 import { DebateOrchestrator } from './DebateOrchestrator.ts';
 import type { Character as ExtendedCharacter, ExtendedAgentRuntime, Character } from "./types/index.ts";
 
@@ -40,6 +37,7 @@ export const wait = (minTime: number = 1000, maxTime: number = 3000) => {
 };
 
 let nodePlugin: any | undefined;
+
 
 export function createAgent(
   character: Character,
@@ -76,6 +74,8 @@ export function createAgent(
     cacheManager: cache,
   }) as ExtendedAgentRuntime;
   
+  // Add chat interface to runtime
+  
   const pvpSettings = extendedChar.settings?.pvpvai;
   if (pvpSettings) {
     runtime.roomId = pvpSettings.roomId;
@@ -85,7 +85,7 @@ export function createAgent(
   return runtime;
 }
 
-async function startAgent(character: Character, directClient: ExtendedDirectClient) {
+async function startAgent(character: Character, directClient: BaseDirectClient) {
   try {
     const extendedChar = character as unknown as ExtendedCharacter;
     extendedChar.id ??= stringToUuid(extendedChar.name);
@@ -105,33 +105,57 @@ async function startAgent(character: Character, directClient: ExtendedDirectClie
     const runtime = createAgent(extendedChar, db, cache, token);
 
     await runtime.initialize();
-    runtime.clients = await initializeClients(extendedChar, runtime);
+    runtime.clients = {};
 
     if (extendedChar.settings?.pvpvai) {
-      const isGM = extendedChar.agentRole?.type === 'GM';
+      const isGM = extendedChar.agentRole?.type.toUpperCase() === 'GM';
       
       try {
-        const config: GameMasterConfig | AgentConfig = isGM ? {
-          endpoint: extendedChar.settings.pvpvai.endpoint,
-          roomId: extendedChar.settings.pvpvai.roomId,
-          type: 'GM',
-          gameMasterId: Number(extendedChar.settings.pvpvai.gameMasterId), // nr
-          walletAddress: extendedChar.settings.pvpvai.eth_wallet_address, //  wallet address === id
-          creatorId: Number(extendedChar.settings.pvpvai.creatorId) // nr
-        } : {
-          endpoint: extendedChar.settings.pvpvai.endpoint,
-          roomId: extendedChar.settings.pvpvai.roomId,
-          type: 'AGENT',
-          agentId: Number(extendedChar.settings.pvpvai.agentId), // nr
-          walletAddress: extendedChar.settings.pvpvai.eth_wallet_address, // wallet address === id
-          creatorId: Number(extendedChar.settings.pvpvai.creatorId) // nr
+        console.log(`Initializing ${isGM ? 'GM' : 'Agent'} for ${extendedChar.name} with role ${extendedChar.agentRole?.type}`);
+        
+        // Get port based on role
+        const portConfig = isGM ? AGENT_CONFIGS.GAMEMASTER : 
+                         extendedChar.settings.pvpvai.agentId === 50 ? AGENT_CONFIGS.AGENT1 :
+                         extendedChar.settings.pvpvai.agentId === 56 ? AGENT_CONFIGS.AGENT2 :
+                         extendedChar.settings.pvpvai.agentId === 57 ? AGENT_CONFIGS.AGENT3 :
+                         AGENT_CONFIGS.AGENT4;
+
+        // Add private key to config
+        const privateKeyEnv = isGM ? 'GM_PRIVATE_KEY' : 
+                            `AGENT_${extendedChar.settings.pvpvai.agentId}_PRIVATE_KEY`;
+        
+        const config = {
+          endpoint: portConfig.endpoint,
+          walletAddress: extendedChar.settings.pvpvai.eth_wallet_address,
+          creatorId: Number(extendedChar.settings.pvpvai.creatorId),
+          port: portConfig.port,
+          agentId: Number(extendedChar.settings.pvpvai.agentId),
+          privateKey: process.env[privateKeyEnv]
         };
 
-        const pvpvaiClient = createPVPVAIClient(runtime, config);
-        runtime.clients = runtime.clients || {};
-        runtime.clients['pvpvai'] = pvpvaiClient;
+        // Create and initialize client
+        const pvpvaiClient = await createPVPVAIClient(runtime, config);
+        if (pvpvaiClient) {
+          await pvpvaiClient.initialize();
+          runtime.clients['pvpvai'] = pvpvaiClient;
+        }
+
+        // Start listening on the appropriate port
+        await new Promise<void>((resolve, reject) => {
+          try {
+            directClient.app.listen(portConfig.port, () => {
+              console.log(`${extendedChar.name} listening on port ${portConfig.port}`);
+              resolve();
+            });
+          } catch (err) {
+            reject(err);
+          }
+        });
+
+        console.log(`Successfully initialized ${isGM ? 'GM' : 'Agent'} client for ${extendedChar.name}`);
       } catch (error) {
-        console.error('Failed to initialize PvPvAI client:', error);
+        console.error(`Failed to initialize PvPvAI client for ${extendedChar.name}:`, error);
+        throw error;  // Re-throw to handle failure
       }
     }
 
@@ -149,203 +173,61 @@ async function startAgent(character: Character, directClient: ExtendedDirectClie
   }
 }
 
-const checkPortAvailable = (port: number): Promise<boolean> => {
-  return new Promise((resolve) => {
-    const server = net.createServer();
-
-    server.once("error", (err: NodeJS.ErrnoException) => {
-      if (err.code === "EADDRINUSE") {
-        resolve(false);
-      }
-    });
-
-    server.once("listening", () => {
-      server.close();
-      resolve(true);
-    });
-
-    server.listen(port);
-  });
-};
-
-declare module '@elizaos/client-direct' {
-  interface DirectClient {
-    getAgent(agentId: string): CoreAgentRuntime;
-  }
-}
-
-class ExtendedDirectClient extends BaseDirectClient {
-  private _agents: Map<string, ExtendedAgentRuntime> = new Map();
-
-  public getActiveRuntimes(): ExtendedAgentRuntime[] {
-    return Array.from(this._agents.values());
-  }
-
-  constructor() {
-    super();
-    
-    this.app.post("/:agentId/pvp/action", async (req, res) => {
-      const agentId = req.params.agentId;
-      const runtime = this.getAgent(agentId) as ExtendedAgentRuntime;
-      
-      if (!runtime?.pvpvaiClient) {
-        res.status(404).send("Agent not found or PVP/VAI not configured");
-        return;
-      }
-    
-      try {
-        const client = runtime.pvpvaiClient.getClient();
-        
-        if ('sendAIMessage' in client) {
-          await client.sendAIMessage({ text: req.body.content.text });
-        } 
-        else if ('broadcastToRoom' in client) {
-          await client.broadcastToRoom({
-            text: req.body.content.text,
-            roundId: req.body.roundId || runtime.character.settings?.pvpvai?.roundId || 1
-          } as BroadcastContent);  // Add type assertion here
-        }
-        res.json({ success: true });
-      } catch (error) {
-        res.status(500).json({
-          error: "Error processing PVP action",
-          details: error.message
-        });
-      }
-    });
-
-    this.app.post("/:agentId/pvp/status", async (req, res) => {
-      const agentId = req.params.agentId;
-      const runtime = this.getAgent(agentId) as ExtendedAgentRuntime;
-      
-      if (!runtime?.pvpvaiClient) {
-        res.status(404).send("Agent not found or PVP/VAI not configured");
-        return;
-      }
-
-      try {
-        res.json({ success: true });
-      } catch (error) {
-        res.status(500).json({
-          error: "Error updating PVP status",
-          details: error.message
-        });
-      }
-    });
-
-    this.app.post("/:agentId/gm/action", async (req, res) => {
-      const agentId = req.params.agentId;
-      const runtime = this.getAgent(agentId) as ExtendedAgentRuntime;
-      
-      if (!runtime?.pvpvaiClient) {
-        res.status(404).send("Agent not found or GameMaster not configured");
-        return;
-      }
-    
-      try {
-        const client = runtime.pvpvaiClient.getClient();
-        
-        if ('broadcastToRoom' in client) {
-          await client.broadcastToRoom({
-            text: req.body.content.text,
-            roundId: req.body.roundId || runtime.character.settings?.pvpvai?.roundId || 1
-          });
-        } else {
-          throw new Error('Not a GameMaster client');
-        }
-        res.json({ success: true });
-      } catch (error) {
-        res.status(500).json({
-          error: "Error processing GM action",
-          details: error.message
-        });
-      }
-    });
-  }
-
-  public override getAgent(agentId: string): ExtendedAgentRuntime | undefined {
-    const agent = super.getAgent(agentId);
-    return agent as ExtendedAgentRuntime | undefined;
-  }
-
-  public override registerAgent(runtime: ExtendedAgentRuntime): void {
-    super.registerAgent(runtime);
-    this._agents.set(runtime.agentId, runtime);
-  }
-}
-
 const startAgents = async () => {
-  const directClient = new ExtendedDirectClient();
-  let serverPort = parseInt(settings.SERVER_PORT || "3000");
+  const directClient = new BaseDirectClient();
   const args = parseArguments();
 
   let charactersArg = args.characters || args.character;
   let characters = [character];
 
-  console.log("charactersArg", charactersArg);
   if (charactersArg) {
     characters = await loadCharacters(charactersArg);
   }
-  console.log("characters", characters);
   
   try {
-    for (const char of characters) {
-      const extendedChar = char as unknown as ExtendedCharacter;
-      if (!extendedChar.agentRole) {
-        throw new Error(`Character ${extendedChar.name} missing required agentRole configuration`);
-      }
-      
-      const extendedCharacter: Character = {
-        ...extendedChar,
-        settings: extendedChar.settings || {},
-        agentRole: extendedChar.agentRole
-      };
-      await startAgent(extendedCharacter, directClient);
+    // Start single agent
+    const char = characters[0];
+    const extendedChar = char as unknown as ExtendedCharacter;
+    if (!extendedChar.agentRole) {
+      throw new Error(`Character ${extendedChar.name} missing required agentRole configuration`);
     }
+    
+    const extendedCharacter: Character = {
+      ...extendedChar,
+      settings: extendedChar.settings || {},
+      agentRole: extendedChar.agentRole
+    };
+
+    const runtime = await startAgent(extendedCharacter, directClient);
+    console.log('Started agent:', {
+      name: runtime.character.name,
+      type: runtime.character.agentRole?.type,
+      id: runtime.agentId
+    });
+
+    if (extendedChar.agentRole?.type.toUpperCase() === 'GM') {
+      // If this is the GM, start the debate orchestrator
+      const orchestrator = new DebateOrchestrator([runtime]);
+      elizaLogger.log("Waiting for connections to establish...");
+      await new Promise(resolve => setTimeout(resolve, 8000));
+      
+      try {
+        elizaLogger.log("Starting debate...");
+        await orchestrator.startDebate();
+      } catch (error) {
+        elizaLogger.error('Error starting debate:', error);
+      }
+
+      process.on('SIGINT', () => {
+        elizaLogger.log("Stopping debate...");
+        orchestrator.stopDebate();
+        process.exit(0);
+      });
+    }
+
   } catch (error) {
     elizaLogger.error("Error starting agents:", error);
-  }
-
-  while (!(await checkPortAvailable(serverPort))) {
-    elizaLogger.warn(`Port ${serverPort} is in use, trying ${serverPort + 1}`);
-    serverPort++;
-  }
-
-  directClient.startAgent = startAgent;
-  directClient.start(serverPort);
-
-  if (serverPort !== parseInt(settings.SERVER_PORT || "3000")) {
-    elizaLogger.log(`Server started on alternate port ${serverPort}`);
-  }
-
-  const isDaemonProcess = process.env.DAEMON_PROCESS === "true";
-  if(!isDaemonProcess) {
-    elizaLogger.log("Chat started. Type 'exit' to quit.");
-    
-    const activeRuntimes = directClient.getActiveRuntimes();
-    console.log('Active runtimes:', activeRuntimes.map(r => ({
-      name: r.character.name,
-      type: r.character.agentRole?.type,
-      id: r.agentId
-    })));
-    
-    const orchestrator = new DebateOrchestrator(activeRuntimes);
-    
-    elizaLogger.log("Waiting for connections to establish...");
-    await new Promise(resolve => setTimeout(resolve, 8000));
-    
-    try {
-      elizaLogger.log("Starting debate...");
-      await orchestrator.startDebate();
-    } catch (error) {
-      elizaLogger.error('Error starting debate:', error);
-    }
-
-    process.on('SIGINT', () => {
-      elizaLogger.log("Stopping debate...");
-      orchestrator.stopDebate();
-      process.exit(0);
-    });
+    process.exit(1);
   }
 };
 

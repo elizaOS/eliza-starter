@@ -6,82 +6,104 @@ import { IAgentRuntime } from "@elizaos/core";
 import { Character } from "../types/index.ts";
 import { createPVPVAIClient } from "./PVPVAIIntegration.ts";
 import { AgentRuntime } from "@elizaos/core";
-// Changed import to include .ts extension to resolve module loading issues
 import { AgentConfig, GameMasterConfig } from "./types.ts";
 
+/**
+ * Initializes all configured clients for an agent runtime
+ * 
+ * @param character - Agent character configuration
+ * @param runtime - Agent runtime instance
+ * @returns Array of initialized clients
+ */
 export async function initializeClients(
   character: Character,
   runtime: IAgentRuntime
 ) {
+  // Initialize clients object on runtime if it doesn't exist
+  runtime.clients = runtime.clients || {};
+  
+  // Track all initialized clients
   const clients = [];
+
+  // Get configured client types from character
   const clientTypes = character.clients?.map((str) => str.toLowerCase()) || [];
 
+  // Initialize Auto client if configured
   if (clientTypes.includes("auto")) {
     const autoClient = await AutoClientInterface.start(runtime);
-    if (autoClient) clients.push(autoClient);
-  }
-
-  if (clientTypes.includes("discord")) {
-    clients.push(await DiscordClientInterface.start(runtime));
-  }
-
-  if (clientTypes.includes("telegram")) {
-    const telegramClient = await TelegramClientInterface.start(runtime);
-    if (telegramClient) clients.push(telegramClient);
-  }
-
-  if (clientTypes.includes("twitter")) {
-    const twitterClients = await TwitterClientInterface.start(runtime);
-    clients.push(twitterClients);
-  }
-
-  // Initialize PvPvAI client if configured
-  if (character.settings?.pvpvai) {
-    const isGM = character.agentRole?.type === "GM";
-    
-    try {
-      if (isGM && character.settings.pvpvai.gameMasterId) {
-        const gmConfig: GameMasterConfig = {
-          endpoint: character.settings.pvpvai.endpoint,
-          roomId: character.settings.pvpvai.roomId,
-          creatorId: character.settings.pvpvai.creatorId,
-          type: 'GM',
-          gameMasterId: character.settings.pvpvai.gameMasterId,
-          walletAddress: character.settings.pvpvai.eth_wallet_address
-        };
-        const pvpvaiClient = createPVPVAIClient(runtime as AgentRuntime, gmConfig);
-        clients.push(pvpvaiClient);
-      } else if (character.settings.pvpvai.agentId) {
-        const agentConfig: AgentConfig = {
-          endpoint: character.settings.pvpvai.endpoint,
-          roomId: character.settings.pvpvai.roomId,
-          creatorId: character.settings.pvpvai.creatorId,
-          type: 'AGENT',
-          agentId: character.settings.pvpvai.agentId,
-          walletAddress: character.settings.pvpvai.eth_wallet_address
-        };
-        const pvpvaiClient = createPVPVAIClient(runtime as AgentRuntime, agentConfig);
-        clients.push(pvpvaiClient);
-      }
-    } catch (error) {
-      console.error('Failed to initialize PvPvAI client:', error);
+    if (autoClient) {
+      clients.push(autoClient);
+      runtime.clients['auto'] = autoClient;
     }
   }
 
+  // Initialize Discord client if configured
+  if (clientTypes.includes("discord")) {
+    const discordClient = await DiscordClientInterface.start(runtime);
+    if (discordClient) {
+      clients.push(discordClient);
+      runtime.clients['discord'] = discordClient;
+    }
+  }
+
+  // Initialize Telegram client if configured
+  if (clientTypes.includes("telegram")) {
+    const telegramClient = await TelegramClientInterface.start(runtime);
+    if (telegramClient) {
+      clients.push(telegramClient);
+      runtime.clients['telegram'] = telegramClient;
+    }
+  }
+
+  // Initialize Twitter client if configured
+  if (clientTypes.includes("twitter")) {
+    const twitterClient = await TwitterClientInterface.start(runtime);
+    if (twitterClient) {
+      clients.push(twitterClient);
+      runtime.clients['twitter'] = twitterClient;
+    }
+  }
+
+  
+
+  // Initialize plugin clients if any
   if (character.plugins?.length > 0) {
     for (const plugin of character.plugins) {
       if (plugin.clients) {
         for (const client of plugin.clients) {
-          clients.push(await client.start(runtime));
+          try {
+            const pluginClient = await client.start(runtime);
+            if (pluginClient) {
+              clients.push(pluginClient);
+              // Store in runtime.clients with plugin name if available
+              if (plugin.name) {
+                runtime.clients[plugin.name] = pluginClient;
+              }
+            }
+          } catch (error) {
+            console.error(`Failed to initialize plugin client:`, error);
+          }
         }
       }
     }
   }
 
+  // Log initialized clients
+  console.log('Initialized clients for', character.name, ':', {
+    total: clients.length,
+    types: Object.keys(runtime.clients)
+  });
+
   return clients;
 }
 
-export * from './types.ts';
-export * from './AgentClient.ts';
-export * from './GameMasterClient.ts';
-export * from './PVPVAIIntegration.ts';
+// Export additional components
+export { AgentClient } from './AgentClient.ts';
+export { GameMasterClient } from './GameMasterClient.ts';
+export { 
+  PVPVAIIntegration,
+  createPVPVAIClient,
+  AGENT_CONFIGS,
+  type Config
+} from './PVPVAIIntegration.ts';
+export { SharedWebSocket, type WebSocketConfig } from './shared-websocket.ts'; 

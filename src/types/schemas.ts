@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { PvpActionCategories, PvpActions } from './pvp.ts';
-import { WsMessageTypes } from './ws.ts';
+import { PvpActionCategories, PvpActions } from '../types/pvp.ts';
+import { WsMessageTypes } from '../types/ws.ts';
 
 /*
   SUBSCRIBE ROOM MESSAGES SCHEMA:
@@ -475,52 +475,3 @@ export type RoomAgentBulkAdd = z.infer<typeof agentBulkAddSchema>;
 export type RoundMessage = z.infer<typeof roundMessageInputSchema>;
 export type RoundOutcome = z.infer<typeof roundOutcomeSchema>;
 export type KickParticipant = z.infer<typeof kickParticipantSchema>;
-// Add MessageHistoryEntry schema
-export const messageHistoryEntrySchema = z.object({
-  timestamp: z.number().optional(),
-  agentId: z.number().optional(),
-  text: z.string().optional(),
-  agentName: z.string(),
-  role: z.enum(['agent', 'gm'])
-});
-
-export type MessageHistoryEntry = z.infer<typeof messageHistoryEntrySchema>;
-
-export const roundAgentMessageSchema = z.object({
-  agent_id: z.number(),
-  round_id: z.number(),
-  message: z.record(z.unknown()),
-  message_type: z.string().nullable(),
-  original_author: z.number().nullable(),
-  pvp_status_effects: z.record(z.unknown()).nullable(),
-  created_at: z.string().optional(),
-  updated_at: z.string().optional()
-});
-
-export const pvpEffectSchema = z.object({
-  effectId: z.string(),
-  actionType: z.enum([
-    'SILENCE', 
-    'DEAFEN', 
-    'ATTACK', 
-    'POISON',
-    'BLIND',  // Add BLIND to allowed action types
-    'DECEIVE',
-    'AMNESIA'
-  ]),
-  sourceId: z.string(),
-  targetId: z.number(),
-  duration: z.number(),
-  createdAt: z.number(),
-  expiresAt: z.number(),
-  details: z.object({
-    find: z.string().optional(),
-    replace: z.string().optional(),
-    case_sensitive: z.boolean().optional(),
-    newPersona: z.string().optional()  // For DECEIVE effect
-  }).optional()
-});
-
-
-export type PvPEffect = z.infer<typeof pvpEffectSchema>;
-

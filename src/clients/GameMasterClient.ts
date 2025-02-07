@@ -1,888 +1,414 @@
-// IMPORTANT: Message Signing Protocol
-// All messages are deterministically stringified using sortObjectKeys to ensure consistent signing/verification.
-// Any updates to sortObjectKeys must be synchronized between client and backend. Websocket incoming.
-
 import axios from 'axios';
-import { EventEmitter } from 'events';
 import { DirectClient } from '@elizaos/client-direct';
 import { ethers } from 'ethers';
 import WebSocket from 'ws';
-import { 
-  AIResponse, 
-  RoundAction,
-  BroadcastContent,
-} from './types.ts';
 import { Character } from '../types/index.ts';
-import { 
-  // Types from schemas
-  PvpAllPvpActionsType,
-  // Message schemas
-  MessageHistoryEntry,
-  roomSetupSchema,
-  RoomSetup,
-  // Common schemas
-  walletAddressSchema,
-  authenticatedMessageSchema,
-  // Core types
-  PvPEffect,
-  observationMessageInputSchema,
-  agentMessageInputSchema,
-  gmMessageInputSchema,
-  pvpEffectSchema,
-  messagesRestResponseSchema,
-  pvpActionEnactedAiChatOutputSchema,
-} from '../types/schemas.ts';
+import { gmMessageInputSchema } from '../types/schemas.ts';
 import { WsMessageTypes } from '../types/ws.ts';
-import { PvpActions } from '../types/pvp.ts';
-import { z } from 'zod';
-import { sortObjectKeys } from './sortObjectKeys.ts';  // Import shared sortObjectKeys
+import { sortObjectKeys } from './sortObjectKeys.ts';
 import { SharedWebSocket, WebSocketConfig } from './shared-websocket.ts';
 
-// Private key should be loaded from environment variables or secure configuration
-export const SIGNER_PRIVATE_KEY = process.env.SIGNER_PRIVATE_KEY;
-if (!SIGNER_PRIVATE_KEY) {
-  throw new Error('SIGNER_PRIVATE_KEY environment variable is required');
-}
-
-const wallet = new ethers.Wallet(SIGNER_PRIVATE_KEY);
-
-// Replace legacy message type guard with schema-based version
-function isAgentMessage(message: z.infer<typeof agentMessageInputSchema> | z.infer<typeof gmMessageInputSchema>): message is z.infer<typeof agentMessageInputSchema> {
-  return message.messageType === WsMessageTypes.AGENT_MESSAGE;
-}
-
-// Add interface for server-expected message format
-interface ServerPvPAction {
-  actionType: PvpActions;
-  sourceId: string;
-  targetId: number;
-  duration: number;
-  details?: {
-    find: string;
-    replace: string;
-    case_sensitive?: boolean;
-  };
-}
-
-interface GMMessagePayload {
-  messageType: 'gm_message';
-  signature: string;
-  sender: string;
-  content: {
-    gmId: number;
-    timestamp: number;
-    roomId: number;
-    roundId: number;
-    message: string;
-    targets: number[];
-    additionalData: {
-      pvpEffects: PvPEffect[];
-      messageHistory: MessageHistoryEntry[];
-    };
-  };
-}
-
-/**
- * GameMasterClient orchestrates room/round management and PvP interactions
- * 
- * Core responsibilities:
- * - Room/round initialization and lifecycle management
- * - PvP effect application and tracking
- * - Message validation and signing
- * - WebSocket connection management
- * - Message history maintenance
- * 
- * Flow:
- * 1. Initialize room/round
- * 2. Setup WebSocket connection
- * 3. Process and relay agent messages
- * 4. Apply/track PvP effects
- * 5. Maintain message history
- * 
- * @class GameMasterClient
- * @extends DirectClient 
- */
-export class GameMasterClient extends DirectClient {
-  private readonly gmId: string;                  // Wallet address
-  private readonly gmNumericId: number = 51;      // Database ID
+export class GameMasterClient extends DirectClient { 
+  private readonly wallet: ethers.Wallet;
+  private readonly gmId: string;                 
+  private readonly gmNumericId: number; 
   private roomId: number;
   private roundId: number;
-  private readonly endpoint: string;
-  private readonly creatorId: number; 
-  private readonly eventEmitter: EventEmitter;
+  public readonly endpoint: string;
+  private readonly creatorId: number;
+  public wsClient: SharedWebSocket;
   private isActive = true;
-  private character: Character;
-  private wallet = wallet;
-  private wsClient: SharedWebSocket;
-  private heartbeatInterval: NodeJS.Timeout | null = null;
-  private readonly HEARTBEAT_INTERVAL = 30000; // 30 seconds
-  private reconnectAttempts: number = 0;
+  private pollInterval: NodeJS.Timeout | null = null;
+  private readonly POLL_INTERVAL = 5000; // 5 seconds
+  private readonly MAX_RETRIES = 60; // 5 minutes maximum polling time
+  private retryCount = 0;
+  private debateStarted = false;
 
-  // Message history tracking
-  private messageHistory: MessageHistoryEntry[] = [];
-  private readonly MAX_HISTORY = 8;
-  private agentNameMap: Map<number, string> = new Map();
-
-  // Add PvP effect tracking
-  private activePvPEffects: Map<number, PvPEffect[]> = new Map();
-  private readonly PVP_SYNC_INTERVAL = 5000; // 5 seconds
-
-  /**
-   * Initializes game master client instance
-   * 
-   * @param endpoint - Server endpoint URL
-   * @param gmId - Game master's Ethereum wallet address  
-   * @param creatorId - Creator's unique identifier
-   * @param character - Game master's character configuration
-   */
   constructor(endpoint: string, gmId: string, creatorId: number, character: Character) {
     super();
     this.endpoint = endpoint;
     this.gmId = character.settings?.pvpvai?.eth_wallet_address || gmId;
     this.creatorId = creatorId;
-    this.eventEmitter = new EventEmitter();
-    this.character = character;
-
+    this.gmNumericId = character.settings?.pvpvai?.gameMasterId || 51;
+    
+    const privateKey = process.env.GM_PRIVATE_KEY;
+    if (!privateKey) {
+      throw new Error('GM_PRIVATE_KEY environment variable is required');
+    }
+    
+    this.wallet = new ethers.Wallet(privateKey);
+    if (this.wallet.address.toLowerCase() !== this.gmId.toLowerCase()) {
+      throw new Error(`GameMaster wallet address mismatch: ${this.wallet.address} != ${this.gmId}`);
+    }
+    
     console.log('GameMasterClient initialized:', {
       endpoint,
       gmId: this.gmId,
+      walletAddress: this.wallet.address,
       creatorId,
-      characterName: character.name
+    });
+  }
+
+  private async generateSignature(content: any): Promise<string> {
+    // Create message object with exact field order using sortObjectKeys
+    const messageObj = sortObjectKeys({
+        gmId: this.gmNumericId,
+        ignoreErrors: false,
+        message: content.message,
+        roomId: content.roomId,
+        roundId: content.roundId,
+        targets: content.targets,
+        timestamp: content.timestamp
     });
 
-    this.startPvPSync();
+    const messageString = JSON.stringify(messageObj);
+    console.log('GM signing message:', messageString);
+    return await this.wallet.signMessage(messageString);
   }
 
-  
-
-  private async updateMessageHistory(
-    message: z.infer<typeof agentMessageInputSchema> | z.infer<typeof gmMessageInputSchema>
-  ): Promise<void> {
-    // Ensure proper type narrowing
-    if (message.messageType === WsMessageTypes.AGENT_MESSAGE) {
-      const entry: MessageHistoryEntry = {
-        timestamp: message.content.timestamp,
-        agentId: message.content.agentId,
-        text: message.content.text,
-        agentName: await this.getAgentName(message.content.agentId),
-        role: 'agent'
-      };
-      this.messageHistory.push(entry);
-    } else {
-      const entry: MessageHistoryEntry = {
-        timestamp: message.content.timestamp,
-        agentId: this.gmNumericId,
-        text: message.content.message,
-        agentName: 'Game Master',
-        role: 'gm'
-      };
-      this.messageHistory.push(entry);
-    }
-
-    if (this.messageHistory.length > this.MAX_HISTORY) {
-      this.messageHistory = this.messageHistory.slice(-this.MAX_HISTORY);
-    }
-  }
-
-  private async getAgentName(agentId: number): Promise<string> {
-    if (this.agentNameMap.has(agentId)) {
-      return this.agentNameMap.get(agentId)!;
-    }
+  public async setRoomAndRound(roomId: number, roundId: number): Promise<void> {
+    console.log(`Setting room ${roomId} and round ${roundId} for GM`);
+    this.roomId = roomId;
+    this.roundId = roundId;
 
     try {
-      const response = await axios.get(`${this.endpoint}/agents/${agentId}`);
-      const name = response.data.name || `Agent ${agentId}`;
-      this.agentNameMap.set(agentId, name);
-      return name;
-    } catch (error) {
-      console.error(`Error fetching agent name for ${agentId}:`, error);
-      return `Agent ${agentId}`;
-    }
-  }
+      // STEP 1: Check if GM is already registered
+      const { data: existingAgents } = await axios.get(`${this.endpoint}/agents/rooms/${roomId}`);
+      const isRegistered = existingAgents.data?.some((a: any) =>
+        a.agent_id === this.gmNumericId &&
+        a.wallet_address?.toLowerCase() === this.wallet.address.toLowerCase()
+      );
 
-  /**
-   * Initializes room and round for debate
-   * Handles both new room creation and existing room connection
-   * 
-   * @returns Promise resolving when initialization complete
-   * @throws Error if initialization fails
-   */
-  public async initialize(): Promise<void> {
-    try {
-      console.log('Starting GameMaster initialization...');
+      if (!isRegistered) {
+        // Register GM with proper snake_case
+        await axios.post(`${this.endpoint}/rooms/${roomId}/agents`, {
+          agent_id: this.gmNumericId,
+          wallet_address: this.wallet.address,
+          type: 'GM'
+        });
+        console.log('GM registered to room');
 
-      // Validate setup payload using schema
-      const setupPayload = roomSetupSchema.parse({
-        name: "Crypto Debate Room",
-        room_type: "buy_hold_sell", 
-        token: "0x0000000000000000000000000000000000000000",
-        token_webhook: `${this.endpoint}/webhook`,
-        agents: {},
-        gm: this.gmId,
-        chain_id: "1",
-        chain_family: "EVM",
-        room_config: {
-          round_duration: 300,
-          pvp_config: {
-            enabled: true,
-            enabled_rules: ["Silence", "Deafen", "Attack", "Poison"]
-          }
-        },
-        transaction_hash: "0x0000000000000000000000000000000000000000000000000000000000000000"
-      });
+        // Wait for registration to be confirmed
+        await new Promise(resolve => setTimeout(resolve, 2000));
 
-      // First try to find existing active room
-      let roomResponse;
+        // Verify registration
+        const { data: verifyRegistration } = await axios.get(`${this.endpoint}/agents/rooms/${roomId}`);
+        if (!verifyRegistration.data?.some((a: any) => a.agent_id === this.gmNumericId)) {
+          throw new Error('GM registration failed to persist');
+        }
+      } else {
+        console.log('GM already registered to room');
+      }
+
+      // STEP 2: Verify/Create Round
+      const roundData = {
+        room_id: roomId,
+        active: true,
+        game_master_id: this.gmNumericId,
+        round_config: null,
+        status: 'STARTING',
+        pvp_status_effects: '{}'
+      };
+
       try {
-        roomResponse = await axios.get(
-          `${this.endpoint}/rooms/active`,
-          { 
-            params: {
-              name: setupPayload.name,
-              chain_id: setupPayload.chain_id,
-              chain_family: setupPayload.chain_family
-            }
-          }
-        );
-      } catch (error) {
-        console.log('No active room found, creating new one');
-        // Create new room if none exists
-        roomResponse = await axios.post(
-          `${this.endpoint}/rooms/setup`,
-          setupPayload,
-          { headers: { 'Content-Type': 'application/json' } }
-        );
+        await axios.post(`${this.endpoint}/rooms/${roomId}/rounds`, roundData);
+        console.log('Created new round');
+      } catch (createError: any) {
+        if (!createError.response?.data?.error?.includes('can only have one active round')) {
+          throw createError;
+        }
+        console.log('Using existing round');
       }
 
-      if (!roomResponse.data?.roomId) {
-        throw new Error('Invalid room setup response: missing roomId');
+      // STEP 3: Get Active Round ID after a delay
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      const { data: roundList } = await axios.get(`${this.endpoint}/rooms/${roomId}/rounds?active=true`);
+      if (!roundList.success || !roundList.data?.length) {
+        throw new Error('No active round found');
       }
-
-      this.roomId = roomResponse.data.roomId;
-      
-      if (this.character?.settings?.pvpvai) {
-        this.character.settings.pvpvai.roomId = this.roomId;
+      const activeRound = roundList.data.find((r: any) => r.status !== 'END');
+      if (!activeRound) {
+        throw new Error('No active round found');
       }
+      this.roundId = activeRound.id; // Overwrite forced roundId with actual round
 
-      // Get active round or create new one
-      let roundResponse;
-      try {
-        roundResponse = await axios.get(
-          `${this.endpoint}/rounds/active/${this.roomId}`
-        );
-      } catch (error) {
-        console.log('No active round found, creating new one');
-        // Create new round if none exists
-        roundResponse = await axios.post(
-          `${this.endpoint}/rooms/${this.roomId}/rounds`,
-          {
-            game_master_id: this.gmNumericId,
-            round_config: {
-              messageHistory: true
-            }
-          },
-          { headers: { 'Content-Type': 'application/json' } }
-        );
-      }
-
-      if (!roundResponse.data?.id) {
-        throw new Error('Failed to get/create round - no round ID returned');
-      }
-
-      this.roundId = roundResponse.data.id;
-
-      if (this.character?.settings?.pvpvai) {
-        this.character.settings.pvpvai.roundId = this.roundId;
-      }
-
-      console.log('GameMaster initialization complete:', {
-        roomId: this.roomId,
-        roundId: this.roundId,
-        isNewRoom: !roomResponse.data?.existing,
-        isNewRound: !roundResponse.data?.existing
-      });
-
-      // Configure WebSocket
+      // STEP 4: Set up WebSocket with proper auth
       const wsConfig: WebSocketConfig = {
         endpoint: this.endpoint,
         roomId: this.roomId,
         auth: {
-          walletAddress: this.gmId,
+          walletAddress: this.wallet.address,
           agentId: this.gmNumericId,
         },
         handlers: {
           onMessage: this.handleWebSocketMessage.bind(this),
-          onError: (error) => console.error('GM WebSocket error:', error),
-          onClose: () => console.log('GM WebSocket connection closed')
+          onError: console.error,
+          onClose: () => {
+            if (this.isActive) {
+              console.log('GM disconnected, reconnecting...');
+              setTimeout(() => this.wsClient?.connect(), 5000);
+            }
+          }
         }
       };
 
-      // Create and connect WebSocket
+      // Close any existing connection
+      if (this.wsClient) {
+        this.wsClient.close();
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+      // Create new WebSocket instance
       this.wsClient = new SharedWebSocket(wsConfig);
       await this.wsClient.connect();
 
-    } catch (error) {
-      console.error('GameMaster initialization failed:', error);
-      throw error;
-    }
-  }
-
-  private async startPvPSync() {
-    setInterval(async () => {
-      if (this.roundId) {
-        await this.syncRoundState();
-      }
-    }, this.PVP_SYNC_INTERVAL);
-  }
-
-  private async syncRoundState(): Promise<void> {
-    try {
-      // Get complete round state
-      const response = await axios.get(
-        `${this.endpoint}/rounds/${this.roundId}/state`,
-        { headers: { 'Content-Type': 'application/json' } }
-      );
-
-      if (response.data.success) {
-        // Update PvP effects
-        const effectsMap = new Map<number, PvPEffect[]>();
-        const now = Date.now();
-        
-        response.data.data.activePvPEffects
-          .filter(effect => effect.expiresAt > now)
-          .forEach(effect => {
-            const targetEffects = effectsMap.get(effect.targetId) || [];
-            targetEffects.push(effect);
-            effectsMap.set(effect.targetId, targetEffects);
-          });
-        
-        this.activePvPEffects = effectsMap;
-
-        // Update message history from database
-        if (response.data.data.messageHistory?.length > 0) {
-          this.messageHistory = response.data.data.messageHistory
-            .slice(-this.MAX_HISTORY)
-            .map(msg => ({
-              timestamp: msg.timestamp,
-              agentId: msg.agentId,
-              text: msg.text,
-              agentName: msg.agentName || `Agent ${msg.agentId}`,
-              role: msg.role || 'agent'
-            }));
-        }
-      }
-    } catch (error) {
-      console.error('Error syncing round state:', error);
-    }
-  }
-
-  public async applyPvPEffect(effect: PvpAllPvpActionsType): Promise<void> {
-    if (!this.roundId) throw new Error('GameMaster not initialized');
-    
-    // Include actionType and timestamp in signed content
-    const pvpAction = {
-      actionType: effect.actionType,
-      sourceId: this.gmId,
-      targetId: effect.parameters.target,
-      duration: 'duration' in effect.parameters ? 
-        effect.parameters.duration : 
-        effect.actionType === PvpActions.ATTACK || effect.actionType === PvpActions.AMNESIA ? 
-          0 : 30,
-      details: effect.actionType === PvpActions.POISON ? {
-        find: 'find' in effect.parameters ? effect.parameters.find : '',
-        replace: 'replace' in effect.parameters ? effect.parameters.replace : '',
-        case_sensitive: 'case_sensitive' in effect.parameters ? effect.parameters.case_sensitive : false
-      } : undefined,
-      timestamp: Date.now(),
-      nonce: Math.floor(Math.random() * 1000000)
-    };
-
-    // Validate effect before proceeding
-    if (!this.validatePvPEffect(pvpAction)) {
-      throw new Error('Invalid PvP effect configuration');
-    }
-
-    const signature = await this.generateDevSignature(pvpAction);
-
-    try {
-      // Format effect according to schema expectations
-      const pvpAction = {
-        actionType: effect.actionType,
-        sourceId: this.gmId,  
-        targetId: effect.parameters.target,
-        // Handle duration based on action type
-        duration: 'duration' in effect.parameters ? 
-          effect.parameters.duration : 
-          effect.actionType === PvpActions.ATTACK || effect.actionType === PvpActions.AMNESIA ? 
-            0 : 30, // Default 30s for status effects, 0 for direct actions
-        details: effect.actionType === PvpActions.POISON ? {
-          find: 'find' in effect.parameters ? effect.parameters.find : '',
-          replace: 'replace' in effect.parameters ? effect.parameters.replace : '',
-          case_sensitive: 'case_sensitive' in effect.parameters ? effect.parameters.case_sensitive : false
-        } : undefined
+      // STEP 5: Subscribe to room
+      const subscribeMessage = {
+        messageType: WsMessageTypes.SUBSCRIBE_ROOM,
+        content: { roomId: this.roomId }
       };
+      this.wsClient.send(subscribeMessage);
 
-      const signature = await this.generateDevSignature(pvpAction);
+      // STEP 6: Verify all expected agents
+      const expectedAgentIds = [50, 56, 57, 58]; // Expected agent IDs
+      await this.verifyAgentsInRoom(expectedAgentIds);
 
-      // Use schema-validated request
-      const response = await axios.post(
-        `${this.endpoint}/rounds/${this.roundId}/pvp`,
-        pvpAction,
-        {
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${signature}`,
-            'X-Wallet-Address': this.gmId
-          }
-        }
-      );
-
-      if (!response.data.success) {
-        throw new Error(response.data.error || 'Failed to apply PvP effect');
-      }
-
-      // Parse server response through schema
-      const serverEffect = pvpEffectSchema.parse(response.data.data);
-      
-      // Update local state
-      const targetEffects = this.activePvPEffects.get(effect.parameters.target) || [];
-      targetEffects.push(serverEffect);
-      this.activePvPEffects.set(effect.parameters.target, targetEffects);
-
-      // Emit pvp event for subscribers
-      this.eventEmitter.emit('pvpAction', {
-        messageType: WsMessageTypes.PVP_ACTION_ENACTED,
-        signature,
-        sender: this.gmId,
-        content: {
-          timestamp: Date.now(),
-          roomId: this.roomId,
-          roundId: this.roundId,
-          instigator: this.gmNumericId,
-          instigatorAddress: this.gmId,
-          txHash: response.data.txHash || '',
-          action: pvpAction
-        }
-      });
-
-      console.log('Successfully applied PvP effect:', serverEffect);
-    } catch (error) {
-      console.error('Error applying PvP effect:', error);
-      throw error;
-    }
-  }
-
-  private validatePvPEffect(effect: PvPEffect): boolean {
-    if (!effect.actionType || !effect.targetId) return false;
-    if (effect.duration < 0) return false;
-    
-    // Validate POISON effect details
-    if (effect.actionType === PvpActions.POISON) {
-      if (!effect.details?.find || !effect.details?.replace) return false;
-    }
-    
-    return true;
-  }
-
-  public async sendGMMessage(content: { 
-    text: string; 
-    targets?: number[];
-    deadline?: number;
-    additionalData?: Record<string, any>;
-    ignoreErrors?: boolean;
-  }): Promise<void> {
-    if (!this.roomId || !this.roundId) {
-      throw new Error('GameMaster not initialized - call initialize() first');
-    }
-
-    const timestamp = Date.now();
-
-    // Build core content that will be signed
-    const coreContent = {
-      timestamp: Date.now(),
-      nonce: Math.floor(Math.random() * 1000000),
-      roomId: this.roomId,
-      roundId: this.roundId,
-      gmId: this.gmNumericId,
-      message: content.text,  // Server expects 'message' not 'text'
-      pvp_effects: Array.from(this.activePvPEffects.values()).flat()
-    };
-
-    // Generate signature on core content only
-    const signature = await this.generateDevSignature(coreContent);
-
-    // Build the complete message matching server schema
-    const gmMessage = gmMessageInputSchema.parse({
-      messageType: WsMessageTypes.GM_MESSAGE,
-      signature,
-      sender: this.gmId,
-      content: {
-        ...coreContent, // Include signed content
-        targets: content.targets || [],
-        deadline: content.deadline,
-        additionalData: {
-          ...content.additionalData,
-          messageHistory: this.messageHistory,
-          currentRound: {
-            id: this.roundId,
-            agents: content.targets?.length || 0
-          }
-        },
-        ignoreErrors: content.ignoreErrors ?? false
-      }
-    });
-
-    try {
-      // Send message with all required headers
-      const response = await axios.post(
-        `${this.endpoint}/messages/gmMessage`,
-        gmMessage,
-        { 
-          headers: { 
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${signature}`,
-            'X-Wallet-Address': this.gmId
-          } 
-        }
-      );
-
-      if (response.data.error) {
-        throw new Error(response.data.error);
-      }
-
-      // Update message history
-      await this.updateMessageHistory(gmMessage);
-
-    } catch (error) {
-      console.error('Error sending GM message:', error);
-      throw error;
-    }
-  }
-
-  private async generateDevSignature(content: any): Promise<string> {
-    try {
-      // Extract ONLY the fields that should be signed
-      const messageContent = {
-        timestamp: Date.now(),
-        nonce: Math.floor(Math.random() * 1000000),
+      console.log('Room and round setup complete:', {
         roomId: this.roomId,
         roundId: this.roundId,
-        gmId: this.gmNumericId,
-        message: typeof content === 'string' ? 
-          content : 
-          content.text || content.message || content
-      };
-      
-      // Use deterministic stringification
-      const messageString = JSON.stringify(sortObjectKeys(messageContent));
-      console.log('Signing content:', messageContent);
-      console.log('Signing string:', messageString);
-      
-      const signature = await this.wallet.signMessage(messageString);
-      
-      // Verify locally
-      const recoveredAddress = ethers.verifyMessage(messageString, signature);
-      if (recoveredAddress.toLowerCase() !== this.gmId.toLowerCase()) {
-        throw new Error(`Signature verification failed - recovered ${recoveredAddress} but expected ${this.gmId}`);
-      }
-      
-      return signature;
-    } catch (error) {
-      console.error('Error generating signature:', error);
-      throw error;
-    }
-  }
-
-  private async processObservationMessage(message: z.infer<typeof observationMessageInputSchema>): Promise<void> {
-    // Validate the observation message
-    try {
-      const validatedMessage = observationMessageInputSchema.parse(message);
-      
-      // Store in message history if relevant
-      if (validatedMessage.content.roundId === this.roundId) {
-        this.messageHistory.push({
-          timestamp: validatedMessage.content.timestamp,
-          agentId: validatedMessage.content.agentId,
-          text: `Observation: ${JSON.stringify(validatedMessage.content.data)}`,
-          agentName: 'Oracle',
-          role: 'agent'
-        });
-      }
-
-      // Emit event for subscribers
-      this.eventEmitter.emit('observation', validatedMessage);
-    } catch (error) {
-      console.error('Invalid observation message:', error);
-      throw error;
-    }
-  }
-
-
-
-  private async processAgentMessage(message: z.infer<typeof agentMessageInputSchema>): Promise<void> {
-    try {
-      const validatedMessage = agentMessageInputSchema.parse(message);
-      
-      if (this.isAgentSilenced(validatedMessage.content.agentId)) {
-        throw new Error('Agent is silenced');
-      }
-
-      // Process PvP effects
-      let modifiedText = validatedMessage.content.text;
-      const effects = this.getAgentPvPEffects(validatedMessage.content.agentId);
-      for (const effect of effects) {
-        if (effect.actionType === PvpActions.POISON && effect.details) {
-          const regex = new RegExp(effect.details.find, effect.details.case_sensitive ? 'g' : 'gi');
-          modifiedText = modifiedText.replace(regex, effect.details.replace);
-        }
-      }
-
-      // Store message in database with PvP effects
-      await axios.post(
-        `${this.endpoint}/messages/agentMessage`,
-        {
-          messageType: WsMessageTypes.AGENT_MESSAGE,
-          signature: validatedMessage.signature,
-          sender: validatedMessage.sender,
-          content: {
-            ...validatedMessage.content,
-            text: modifiedText,
-            pvp_effects: effects,
-            timestamp: Date.now()
-          }
-        },
-        { headers: { 'Content-Type': 'application/json' } }
-      );
-
-      // Update local history
-      await this.updateMessageHistory({
-        ...validatedMessage,
-        content: { ...validatedMessage.content, text: modifiedText }
+        agentsVerified: true
       });
 
-      this.eventEmitter.emit('agentMessage', validatedMessage);
     } catch (error) {
-      console.error('Invalid agent message:', error);
+      console.error('Error in setRoomAndRound:', error);
       throw error;
     }
   }
 
-  public async broadcastToRoom(content: BroadcastContent): Promise<void> {
-    if (!this.roomId || !this.roundId) {
-      throw new Error('GameMaster not initialized - call initialize() first');
-    }
+  // New helper method to verify expected agents are registered in the room
+  private async verifyAgentsInRoom(expectedAgentIds: number[]): Promise<void> {
+    const maxRetries = 30; // 30 retries (approximately 30 seconds)
+    let retries = 0;
 
-    console.log('Broadcasting to room:', content);
+    while (retries < maxRetries) {
+      const { data: agents } = await axios.get(`${this.endpoint}/agents/rooms/${this.roomId}`);
+      const registeredAgentIds = agents.data?.map((a: any) => a.agent_id) || [];
+      const missingAgents = expectedAgentIds.filter(id => !registeredAgentIds.includes(id));
 
-    // Get all agents in the round
-    const agents = await this.getRoundAgents(content.roundId || this.roundId);
-    
-    // Always ensure we have the latest message history from database
-    try {
-      const response = await axios.get(
-        `${this.endpoint}/rounds/${this.roundId}/messages`,
-        { headers: { 'Content-Type': 'application/json' } }
-      );
-
-      if (response.data.messages) {
-        // Update local message history with database state
-        this.messageHistory = response.data.messages
-          .slice(-this.MAX_HISTORY)
-          .map(msg => ({
-            timestamp: msg.timestamp,
-            agentId: msg.agentId,
-            text: msg.text,
-            agentName: msg.agentName || `Agent ${msg.agentId}`,
-            role: msg.role || 'agent'
-          }));
+      if (missingAgents.length === 0) {
+        console.log('All expected agents verified in room');
+        return;
       }
-    } catch (error) {
-      console.warn('Failed to fetch message history from database:', error);
-      // Continue with existing history if fetch fails
+
+      console.log(`Waiting for agents to register: ${missingAgents.join(', ')}`);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      retries++;
     }
 
-    // Build context with guaranteed message history
-    const context = {
-      messageHistory: this.messageHistory,
-      currentRound: {
-        id: this.roundId,
-        agents: agents.length
-      },
-      // Force include last 3 messages minimum
-      lastMessages: this.messageHistory.slice(-3).map(msg => ({
-        agentName: msg.agentName,
-        text: msg.text
-      })),
-      activePvPEffects: Array.from(this.activePvPEffects.values()).flat()
-    };
-
-    // Broadcast to all agents with context
-    await this.sendGMMessage({
-      text: content.text, // Keep using 'text' in external interface
-      targets: agents,
-      additionalData: context
-    });
+    throw new Error('Timeout waiting for all agents to register');
   }
 
-  public async handleAgentMessage(message: z.infer<typeof agentMessageInputSchema>): Promise<void> {
-    // Convert legacy message to new format ensuring all required fields
-    const newMessage = {
-      messageType: WsMessageTypes.AGENT_MESSAGE as const,
-      signature: message.signature,
-      sender: message.sender,
-      content: {
-        timestamp: Date.now(), // Required field
-        roomId: this.roomId ?? 0, // Required field
-        roundId: this.roundId ?? 0, // Required field
-        agentId: message.content.agentId ?? 0, // Required field
-        text: message.content.text || '' // Required field
-      } as const // Make TypeScript treat this as exact type
-    };
-
-    // Validate entire message against schema before processing
-    const validatedMessage = agentMessageInputSchema.parse(newMessage);
-    await this.processAgentMessage(validatedMessage);
-  }
-
-  public async handleObservation(observation: z.infer<typeof observationMessageInputSchema>): Promise<void> {
+  private async getRoundState(): Promise<any> {
     try {
-      // Process and validate observation
-      await this.processObservationMessage(observation);
+      // First check if round exists
+      const roundCheck = await axios.get(
+        `${this.endpoint}/rooms/${this.roomId}/rounds/${this.roundId}`
+      );
+      
+      if (!roundCheck.data.success) {
+        throw new Error('Round not found');
+      }
 
-      // Get all agents in round
-      const agents = await this.getRoundAgents(this.roundId);
+      // Then get participants
+      const participantsResp = await axios.get(
+        `${this.endpoint}/agents/rooms/${this.roomId}`
+      );
+      
+      if (!participantsResp.data.success) {
+        throw new Error('Failed to get room participants');
+      }
 
-      // Create signature for observation from GM
-      const signature = await this.generateDevSignature(observation.content);
-      const signedObservation = {
-        ...observation,
-        signature,
-        sender: this.gmId // GM as sender
+      // Combine data into state object
+      return {
+        round: roundCheck.data.data,
+        participants: participantsResp.data.data?.filter((p: any) => 
+          // Include both agents and GM in participants list
+          p.wallet_address?.toLowerCase() !== this.wallet.address.toLowerCase()
+        ) || []
       };
 
-      // Send to each non-blinded agent
-      for (const agentId of agents) {
-        // Skip blinded agents
-        if (this.getAgentPvPEffects(agentId).some(e => 
-          e.actionType === 'BLIND' && Date.now() < e.expiresAt  // Use string literal instead of enum
-        )) {
-          console.log(`Agent ${agentId} is blinded, skipping observation`);
-          continue; 
+    } catch (error) {
+      console.error('Error getting round state:', error);
+      throw error;
+    }
+  }
+
+  private async startPollingForAgents(): Promise<void> {
+    if (this.pollInterval) {
+      clearInterval(this.pollInterval);
+    }
+
+    this.pollInterval = setInterval(async () => {
+      if (this.retryCount >= this.MAX_RETRIES) {
+        console.log('Max retries reached, stopping agent polling');
+        this.stopPolling();
+        return;
+      }
+
+      try {
+        const roundState = await this.getRoundState();
+        // Remove type check, just look for non-GM participants
+        const agents = roundState?.participants?.filter((p: any) => p.id !== this.gmNumericId) || [];
+        
+        if (agents.length > 0) {
+          console.log(`Found ${agents.length} agents in room, starting debate...`);
+          this.stopPolling();
+          await this.startDebate();
+        } else {
+          console.log('No agents found, retrying...');
+          this.retryCount++;
+        }
+      } catch (error) {
+        console.error('Error polling for agents:', error);
+        this.retryCount++;
+      }
+    }, this.POLL_INTERVAL);
+  }
+
+  private stopPolling(): void {
+    if (this.pollInterval) {
+      clearInterval(this.pollInterval);
+      this.pollInterval = null;
+    }
+  }
+
+  // Added validation method to return only registered agent IDs
+  private async validateAgents(agentIds: number[]): Promise<number[]> {
+    const roundState = await this.getRoundState();
+    const registeredAgents = roundState.participants.map((p: any) => p.agent_id);
+    return agentIds.filter(id => registeredAgents.includes(id));
+  }
+
+  // Added method for explicit target validation
+  private async validateTargetAgents(targets: number[]): Promise<number[]> {
+    const { data: agents } = await axios.get(`${this.endpoint}/agents/rooms/${this.roomId}`);
+    const registeredAgents = agents.data?.map((a: any) => a.agent_id) || [];
+    return targets.filter(target => registeredAgents.includes(target));
+  }
+
+  public async startDebate(): Promise<void> {
+    if (this.debateStarted) {
+      console.log('Debate already started');
+      return;
+    }
+
+    try {
+      const roundState = await this.getRoundState();
+      if (!roundState?.participants?.length) {
+        console.warn('No participants found in round state');
+        return;
+      }
+
+      // Send initial messages
+      await this.sendGMMessage('Room initialized. Beginning debate round.', []);
+      await this.sendGMMessage('Beginning discussion phase. Agents may now engage in debate.', []);
+
+      // Get agent IDs from participants
+      const agentIds = roundState.participants.map((p: any) => p.agent_id);
+
+      // Validate agents using the new method
+      const validAgentIds = await this.validateAgents(agentIds);
+      if (validAgentIds.length === 0) {
+        throw new Error('No valid agents found in room');
+      }
+      
+      const topic = "Let's discuss the future of cryptocurrency. What are your thoughts on Bitcoin versus Ethereum?";
+      await this.sendGMMessage(topic, validAgentIds);
+      
+      this.debateStarted = true;
+    } catch (error) {
+      console.error('Error starting debate:', error);
+      throw error;
+    }
+  }
+
+  public async sendGMMessage(text: string, targets: number[] = []): Promise<void> {
+    if (!this.roomId || !this.roundId) {
+      throw new Error('GameMaster not initialized with room/round');
+    }
+
+    try {
+        const roundState = await this.getRoundState();
+        console.log('Round state before sending message:', roundState);
+
+        // Validate targets against registered participants
+        const validTargets = roundState.participants.map((p: any) => p.agent_id);
+        if (targets.length && !targets.every(t => validTargets.includes(t))) {
+          // Use valid targets from server to fix target mismatch
+          targets = validTargets;
+          console.log('Targets overridden with valid targets:', targets);
         }
 
-        try {
-          // Get agent endpoint from database
-          const response = await axios.get(`${this.endpoint}/agents/${agentId}`);
-          const agentEndpoint = response.data.endpoint;
+        const content = sortObjectKeys({
+            gmId: this.gmNumericId,
+            ignoreErrors: false,
+            message: text,
+            roomId: this.roomId,
+            roundId: this.roundId,
+            targets,
+            timestamp: Date.now()
+        });
 
-          // Send observation to agent
-          await axios.post(
-            `${agentEndpoint}/message`,
-            signedObservation,
-            { headers: { 'Content-Type': 'application/json' }}
-          );
-        } catch (error) {
-          console.error(`Failed to send observation to agent ${agentId}:`, error);
-        }
-      }
+        const signature = await this.generateSignature(content);
 
-      // Emit event for subscribers
-      this.eventEmitter.emit('observation', observation);
+        const message = gmMessageInputSchema.parse({
+            messageType: WsMessageTypes.GM_MESSAGE,
+            sender: this.wallet.address,
+            signature,
+            content
+        });
 
+        console.log('Sending GM message:', JSON.stringify(message, null, 2));
+        const response = await axios.post(
+            `${this.endpoint}/messages/gmMessage`,
+            message,
+            {
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            }
+        );
+        console.log('GM message sent:', response.data);
     } catch (error) {
-      console.error('Error handling observation:', error);
-      throw error;
+        console.error('Error sending GM message:', error);
+        throw error;
     }
   }
 
-  public getMessageContext(): MessageHistoryEntry[] {
-    return [...this.messageHistory];
+  public async broadcastToRoom(content: { text: string }): Promise<void> {
+    await this.sendGMMessage(content.text, []);
   }
 
-  public async getRoundAgents(roundId: number): Promise<number[]> {
+  private handleWebSocketMessage(data: WebSocket.Data): void {
     try {
-      const response = await axios.get(
-        `${this.endpoint}/rounds/${roundId}/agents`,
-        { headers: { 'Content-Type': 'application/json' } }
-      );
-      return response.data.agents || [];
-    } catch (error) {
-      console.error('Error getting round agents:', error);
-      return [];
-    }
-  }
+      const message = JSON.parse(data.toString());
+      
+      switch (message.messageType) {
+        case WsMessageTypes.SYSTEM_NOTIFICATION:
+          console.log('GM System notification:', message.content.text);
+          break;
 
-  public async endRound(outcome?: any): Promise<void> {
-    if (!this.roundId) {
-      throw new Error('GameMaster not initialized - call initialize() first');
-    }
-
-    const action: RoundAction = { 
-      roundId: this.roundId, 
-      outcome 
-    };
-
-    try {
-      const response = await axios.post<AIResponse>(
-        `${this.endpoint}/rounds/${this.roundId}/end`,
-        action,
-        { headers: { 'Content-Type': 'application/json' } }
-      );
-
-      if (!response.data.success) {
-        throw new Error(response.data.error || 'Failed to end round');
+        case WsMessageTypes.HEARTBEAT:
+          if (this.wsClient?.isConnected()) {
+            this.wsClient.send({
+              messageType: WsMessageTypes.HEARTBEAT,
+              content: {}
+            });
+          }
+          break;
       }
-
-      // Clear message history on round end
-      this.messageHistory = [];
     } catch (error) {
-      console.error('Error ending round:', error);
-      throw error;
+      console.error('Error handling WebSocket message:', error);
     }
-  }
-
-  public async kickParticipant(agentId: string): Promise<void> {
-    if (!this.roundId) {
-      throw new Error('GameMaster not initialized - call initialize() first');
-    }
-
-    try {
-      const response = await axios.post<AIResponse>(
-        `${this.endpoint}/rounds/${this.roundId}/kick`,
-        { agentId },
-        { headers: { 'Content-Type': 'application/json' } }
-      );
-
-      if (!response.data.success) {
-        throw new Error(response.data.error || 'Failed to kick participant');
-      }
-
-      // Remove kicked agent's messages from history
-      this.messageHistory = this.messageHistory.filter(
-        msg => msg.agentId !== parseInt(agentId)
-      );
-    } catch (error) {
-      console.error('Error kicking participant:', error);
-      throw error;
-    }
-  }
-
-
-
-  private getAgentPvPEffects(agentId: number): PvPEffect[] {
-    return this.activePvPEffects.get(agentId) || [];
-  }
-
-  public isAgentSilenced(agentId: number): boolean {
-    return this.getAgentPvPEffects(agentId).some(
-      effect => effect.actionType === 'SILENCE' && Date.now() < effect.expiresAt
-    );
-  }
-
-  public isAgentDeafened(agentId: number): boolean {
-    return this.getAgentPvPEffects(agentId).some(
-      effect => effect.actionType === 'DEAFEN' && Date.now() < effect.expiresAt
-    );
   }
 
   public getRoomId(): number {
@@ -894,44 +420,11 @@ export class GameMasterClient extends DirectClient {
   }
 
   public override stop(): void {
+    this.stopPolling();
+    this.isActive = false;
     if (this.wsClient) {
       this.wsClient.close();
     }
-    this.isActive = false;
-    this.messageHistory = [];
-    this.agentNameMap.clear();
-    this.activePvPEffects.clear();
     super.stop();
-  }
-
-  private handleWebSocketMessage(data: WebSocket.Data): void {
-    try {
-      const message = JSON.parse(data.toString());
-      
-      switch (message.messageType) {
-        case WsMessageTypes.SYSTEM_NOTIFICATION:
-          console.log('System notification:', message.content.text);
-          break;
-        case WsMessageTypes.HEARTBEAT:
-          if (this.wsClient.isConnected()) {
-            this.wsClient.send({
-              messageType: WsMessageTypes.HEARTBEAT,
-              content: {}
-            });
-          }
-          break;
-        case WsMessageTypes.PVP_ACTION_ENACTED:
-          // Handle PvP effect updates
-          if (message.content?.action) {
-            const effect = pvpEffectSchema.parse(message.content.action);
-            const targetEffects = this.activePvPEffects.get(effect.targetId) || [];
-            targetEffects.push(effect);
-            this.activePvPEffects.set(effect.targetId, targetEffects);
-          }
-          break;
-      }
-    } catch (error) {
-      console.error('Error handling WebSocket message:', error);
-    }
   }
 }

@@ -93,3 +93,12 @@ pnpm start --characters="characters/1.character.json"
 pnpm start --characters="characters/gamemaster.character.json"
 pnpm start --characters="characters/gamemaster.character.json,characters/1.character.json,characters/2.character.json,characters/3.character.json,characters/4.character.json"
 node --loader ts-node/esm scripts/create_wallet.ts
+
+pnpm start --characters="characters/gamemaster.character.json"
+pnpm start --characters="characters/1.character.json"
+pnpm start --characters="characters/2.character.json"
+pnpm start --characters="characters/3.character.json"
+pnpm start --characters="characters/4.character.json"
+
+
+pnpm start --characters="characters/1.character.json,characters/2.character.json,characters/3.character.json,characters/4.character.json"

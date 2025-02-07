@@ -30,6 +30,7 @@
     "better-sqlite3": "11.5.0",
     "dotenv": "^16.4.7",
     "ethers": "^6.13.5",
+    "fastify": "^5.2.1",
     "fs": "0.0.1-security",
     "net": "1.0.2",
     "path": "0.12.7",

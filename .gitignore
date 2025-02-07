@@ -16,3 +16,7 @@ agent_wallets.json
 agmw.json
 
 *.txt
+
+scripts/
+
+DOSimple.ts

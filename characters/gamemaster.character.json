@@ -22,10 +22,10 @@
     "settings": {
         "model": "google/gemini-2.0-flash-thinking-exp:free",
         "pvpvai": {
-            "wsUrl": "ws://localhost:3000",
+            "wsUrl": "ws://localhost:3330",
             "roomId": 1,
             "roundId": 1, 
-            "endpoint": "http://localhost:3000",
+            "endpoint": "http://localhost:3330",
             "type": "GM",
             "gameMasterId": 51,
             "eth_wallet_address": "0x422921F679089284B5F503649B04aEfD334Cdd69",

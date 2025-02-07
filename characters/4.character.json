@@ -6,10 +6,10 @@
     "settings": {
         "model": "None",
         "pvpvai": {
-            "wsUrl": "ws://localhost:3000/ws",
+            "wsUrl": "ws://localhost:3334/ws",
             "roomId": 1,
             "roundId": 1, 
-            "endpoint": "http://localhost:3000",
+            "endpoint": "http://localhost:3334",
             "type": "AGENT",
             "agentId": 58,
             "eth_wallet_address": "0xe268874c5612e116A1e44D6236c0Cb7D717fa75f",
