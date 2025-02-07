@@ -132,7 +132,7 @@ export class AgentClient extends DirectClient {
   private async getActiveRoundFromContract(): Promise<number> {
     // TODO: Replace with actual contract call
     // For now return static value that matches backend
-    return 570; 
+    return 578; 
   }
 
 // Helper methods to match SQL data
