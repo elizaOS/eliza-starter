@@ -138,7 +138,7 @@ export class GameMasterClient extends DirectClient {
   private async getActiveRoundFromContract(): Promise<number> {
     // TODO: Replace with actual contract call once you have the ABI
     // For now return static value that matches backend
-    return 1;
+    return 570;
   }
 
   public async sendGMMessage(text: string, targets: number[] = []): Promise<void> {
