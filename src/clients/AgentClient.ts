@@ -9,7 +9,16 @@ import { SharedWebSocket, WebSocketConfig } from './shared-websocket.ts';
 import { ExtendedAgentRuntime } from '../types/index.ts';
 import { MessageHistoryEntry } from './types.ts';
 
-
+interface RoundResponse { // for get active rounds
+  success: boolean;
+  data?: {
+    id: number;
+    room_id: number;
+    active: boolean;
+    [key: string]: any; // For other round fields
+  };
+  error?: string;
+}
 
 export class AgentClient extends DirectClient {
   private readonly wallet: Wallet;
@@ -76,7 +85,7 @@ export class AgentClient extends DirectClient {
     
     // Get round ID from contract state
     try {
-      const activeRound = await this.getActiveRoundFromContract();
+      const activeRound = await this.getActiveRound();
       if (!activeRound) {
         throw new Error('No active round found');
       }
@@ -135,6 +144,26 @@ export class AgentClient extends DirectClient {
     return 578; 
   }
 
+  public async getActiveRound(): Promise<number> {
+    try {
+        const response = await axios.get<RoundResponse>(`${this.endpoint}/rooms/${this.roomId}/rounds/active`);
+        
+        if (!response.data.success) {
+            throw new Error(response.data.error || 'Failed to get active round');
+        }
+        
+        if (!response.data.data?.id) {
+            throw new Error('Invalid round data received: missing round ID');
+        }
+
+        return response.data.data.id;
+
+    } catch (error) {
+        console.error('Error fetching active round:', error);
+        throw error;
+    }
+}
+
 // Helper methods to match SQL data
   private getAgentImage(id: number): string {
     const images: {[key: number]: string} = {
@@ -186,27 +215,31 @@ export class AgentClient extends DirectClient {
     }
 
     try {
-        // Create message content with fields in exact order
-        const messageContent = sortObjectKeys({
+        // Create base message content
+        const messageContent = {
             agentId: this.agentNumericId,
+            context: [], // Add empty context array
             roomId: this.roomId,
             roundId: this.roundId,
             text: content.text,
             timestamp: Date.now()
-        });
-
-        // Generate signature
-        const signature = await this.generateSignature(messageContent);
-
-        // Construct final message
-        const message = {
-            messageType: WsMessageTypes.AGENT_MESSAGE,
-            signature,
-            sender: this.walletAddress,
-            content: messageContent
         };
 
-        // Send message to backend message handler
+        // Sort the entire message object structure
+        const sortedContent = sortObjectKeys(messageContent);
+        
+        // Generate signature from sorted content
+        const signature = await this.generateSignature(sortedContent);
+
+        // Construct final message and sort it
+        const message = sortObjectKeys({
+            content: sortedContent,
+            messageType: WsMessageTypes.AGENT_MESSAGE,
+            signature,
+            sender: this.walletAddress
+        });
+
+        // Send message
         await axios.post(
             `${this.endpoint}/messages/agentMessage`,
             message,
@@ -228,16 +261,8 @@ export class AgentClient extends DirectClient {
   }
 
   private async generateSignature(content: any): Promise<string> {
-    // Create message object with exact field order matching backend
-    const messageObj = sortObjectKeys({
-        agentId: content.agentId,
-        roomId: content.roomId,
-        roundId: content.roundId,
-        text: content.text,
-        timestamp: content.timestamp
-    });
-
-    const messageString = JSON.stringify(messageObj);
+    // Sign the stringified sorted content
+    const messageString = JSON.stringify(sortObjectKeys(content));
     console.log('Agent signing message:', messageString);
     return await this.wallet.signMessage(messageString);
 }

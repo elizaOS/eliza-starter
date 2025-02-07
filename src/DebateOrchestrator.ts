@@ -58,6 +58,8 @@ class DebateOrchestrator {
 
     // Initialize GM first
     await gmClient.setRoomAndRound(roomId);
+    // Set roundId from GM client
+    this.roundId = gmClient.getRoundId();
 
     // Initialize other agents
     for (const agent of this.agents) {
@@ -70,35 +72,43 @@ class DebateOrchestrator {
 
     // Wait for all connections to be established
     await this.verifyConnections();
+    
+    console.log(`DebateOrchestrator initialized with room ${this.roomId} and round ${this.roundId}`);
   }
 
   public async startDebate() {
     try {
-      if (!this.roomId || !this.roundId) {
-        throw new Error('Must call initialize() with room and round IDs first');
-      }
+        // Add log to help debug
+        console.log('Starting debate with:', {
+            roomId: this.roomId,
+            roundId: this.roundId
+        });
 
-      this.isDebating = true;
-      this.state.phase = 'init';
+        if (!this.roomId || !this.roundId) {
+            throw new Error('Must call initialize() with room and round IDs first');
+        }
 
-      const gmClient = this.gameMaster?.clients?.pvpvai?.getClient() as GameMasterClient;
-      if (!gmClient) {
-        throw new Error('GM client not initialized');
-      }
+        this.isDebating = true;
+        this.state.phase = 'init';
 
-      // Start debate session
-      await gmClient.sendGMMessage("Room initialized. Beginning debate round.", []);
-      await gmClient.sendGMMessage("Beginning discussion phase. Agents may now engage in debate.", []);
-      
-      const topic = "Let's discuss the future of cryptocurrency. What are your thoughts on Bitcoin versus Ethereum?";
-      const validAgentIds = this.agents.map(a => a.character.settings?.pvpvai?.agentId).filter(Boolean);
-      await gmClient.sendGMMessage(topic, validAgentIds);
-      
-      this.state.phase = 'discussion';
+        const gmClient = this.gameMaster?.clients?.pvpvai?.getClient() as GameMasterClient;
+        if (!gmClient) {
+            throw new Error('GM client not initialized');
+        }
+
+        // Start debate session
+        await gmClient.sendGMMessage("Room initialized. Beginning debate round.", []);
+        await gmClient.sendGMMessage("Beginning discussion phase. Agents may now engage in debate.", []);
+        
+        const topic = "Let's discuss the future of cryptocurrency. What are your thoughts on Bitcoin versus Ethereum?";
+        const validAgentIds = this.agents.map(a => a.character.settings?.pvpvai?.agentId).filter(Boolean);
+        await gmClient.sendGMMessage(topic, validAgentIds);
+        
+        this.state.phase = 'discussion';
 
     } catch (error) {
-      console.error('Error in startDebate:', error);
-      throw error;
+        console.error('Error in startDebate:', error);
+        throw error;
     }
   }
 

@@ -1,4 +1,7 @@
 // src/utils/sortObjectKeys.ts
+/** 
+ * Consistently sorts object keys recursively to ensure deterministic order for signing
+ */
 export function sortObjectKeys(obj: any): any {
     if (typeof obj !== 'object' || obj === null) {
         return obj;

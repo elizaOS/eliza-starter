@@ -8,6 +8,17 @@ import { WsMessageTypes } from '../types/ws.ts';
 import { sortObjectKeys } from './sortObjectKeys.ts';
 import { SharedWebSocket, WebSocketConfig } from './shared-websocket.ts';
 
+interface RoundResponse { // for get active rounds
+  success: boolean;
+  data?: {
+    id: number;
+    room_id: number;
+    active: boolean;
+    [key: string]: any; // For other round fields
+  };
+  error?: string;
+}
+
 export class GameMasterClient extends DirectClient { 
   private readonly wallet: Wallet;
   private readonly gmId: string;                 
@@ -72,7 +83,7 @@ export class GameMasterClient extends DirectClient {
     
     // Get active round ID directly from contract
     try {
-      const activeRound = await this.getActiveRoundFromContract();
+      const activeRound = await this.getActiveRound();
       if (!activeRound) {
         throw new Error('No active round found');
       }
@@ -140,6 +151,26 @@ export class GameMasterClient extends DirectClient {
     // For now return static value that matches backend
     return 578;
   }
+
+  public async getActiveRound(): Promise<number> {
+    try {
+        const response = await axios.get<RoundResponse>(`${this.endpoint}/rooms/${this.roomId}/rounds/active`);
+        
+        if (!response.data.success) {
+            throw new Error(response.data.error || 'Failed to get active round');
+        }
+        
+        if (!response.data.data?.id) {
+            throw new Error('Invalid round data received: missing round ID');
+        }
+
+        return response.data.data.id;
+
+    } catch (error) {
+        console.error('Error fetching active round:', error);
+        throw error; 
+    }
+}
 
   public async sendGMMessage(text: string, targets: number[] = []): Promise<void> {
     if (!this.roomId || !this.roundId) {
