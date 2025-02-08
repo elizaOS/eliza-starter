@@ -11,6 +11,8 @@ rl.on("SIGINT", () => {
   process.exit(0);
 });
 
+const chatHistory: string[] = [];
+
 async function handleUserInput(input, agentId) {
   if (input.toLowerCase() === "exit") {
     rl.close();
@@ -34,7 +36,11 @@ async function handleUserInput(input, agentId) {
     );
 
     const data = await response.json();
-    data.forEach((message) => console.log(`${"Agent"}: ${message.text}`));
+    data.forEach((message) => {
+      const formattedMessage = `${"Agent"}: ${message.text}`;
+      console.log(formattedMessage);
+      chatHistory.push(formattedMessage);
+    });
   } catch (error) {
     console.error("Error fetching response:", error);
   }
@@ -44,6 +50,13 @@ export function startChat(characters) {
   function chat() {
     const agentId = characters[0].name ?? "Agent";
     rl.question("You: ", async (input) => {
+      if (input.toLocaleLowerCase() === "history") {
+        showChatHistory();
+        chat();
+        return;
+      }
+      
+      chatHistory.push(`You: ${input}`);
       await handleUserInput(input, agentId);
       if (input.toLowerCase() !== "exit") {
         chat(); // Loop back to ask another question
@@ -52,4 +65,11 @@ export function startChat(characters) {
   }
 
   return chat;
+}
+
+export function showChatHistory() {
+  console.log('Chat History:');
+  chatHistory.forEach((message, index) => {
+    console.log(`${index + 1}: ${message}`);
+  });
 }
