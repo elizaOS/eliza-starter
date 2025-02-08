@@ -1,27 +1,24 @@
-import { Character as BaseCharacter, AgentRuntime as BaseAgentRuntime, ModelProviderName, UUID } from "@elizaos/core";
-import { PVPVAIIntegration } from '../clients/PVPVAIIntegration.ts';
+import {
+  AgentRuntime as BaseAgentRuntime,
+  Character as BaseCharacter,
+  UUID,
+} from "@elizaos/core";
+import { PVPVAIIntegration } from "../clients/PVPVAIIntegration.ts";
 
 // Define our additional types
 export interface AgentRole {
-  type: 'GM' | 'AGENT';
+  type: "GM" | "AGENT";
   name: string;
   description: string;
   chain_family?: string;
   chain_id?: number;
 }
 
-
 export interface PVPVAISettings {
-  wsUrl: string;
-  endpoint: string;
-  roomId: number;
-  roundId: number;
-  type: 'GM' | 'AGENT';
-  // For GM
-  gameMasterId?: number;
-  // For Agent
-  agentId?: number;
-  eth_wallet_address?: string; // === eth_wallet_address
+  pvpvaiServerUrl: string;
+  type: "GM" | "AGENT";
+  agentId: number;
+  ethWalletAddress?: string; // === eth_wallet_address
   solanaWalletAddress?: string; // solana_wallet_address
   creatorId: number; // Changed from string to number to match DB schema
 }
@@ -58,21 +55,6 @@ export type ExtendedAgentRuntime = BaseAgentRuntime & {
   roomId?: number;
   creatorId?: number;
 };
-export interface MessageContent {
-  text: string;
-  gm_id?: string;
-  targets?: string[];
-  timestamp?: number;
-  actionType?: 'Silence' | 'Deafen' | 'Attack' | 'Poison';
-}
-
-export interface PvPAction {
-  actionType: 'Silence' | 'Deafen' | 'Attack' | 'Poison';
-  sourceId: string;
-  targetId: string;
-  duration: number;
-  timestamp: number;
-}
 
 export interface DebateMemory {
   id: UUID;

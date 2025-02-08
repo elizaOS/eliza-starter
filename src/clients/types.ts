@@ -19,9 +19,8 @@ export interface BaseMessage {
 export interface MessageHistoryEntry {
   timestamp: number;
   agentId: number;
-  text: string;
   agentName: string;
-  role: 'agent' | 'gm' | 'oracle';
+  text: string;
 }
 
 export interface BroadcastContent {

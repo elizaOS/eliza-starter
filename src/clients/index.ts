@@ -97,7 +97,6 @@ export async function initializeClients(
 
 // Export additional components
 export { AgentClient } from './AgentClient.ts';
-export { GameMasterClient } from './GameMasterClient.ts';
 export { 
   PVPVAIIntegration,
   createPVPVAIClient,
