@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts",
-    "start": "tsc && node --loader ts-node/esm src/index.ts",
+    "start": "tsx src/index.ts",
     "clean": "./scripts/clean.sh",
     "start:service:all": "pm2 start pnpm --name=\"all\" --restart-delay=3000 --max-restarts=10 -- run start:all",
     "stop:service:all": "pm2 stop all"
@@ -44,7 +44,7 @@
     }
   },
   "devDependencies": {
-    "ts-node": "10.9.2",
+    "tsx": "4.19.2",
     "tsup": "8.3.5",
     "typescript": "5.6.3",
     "pm2": "5.4.3" 
